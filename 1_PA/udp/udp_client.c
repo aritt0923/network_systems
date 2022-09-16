@@ -36,8 +36,8 @@ void str_to_lower(char *buf);
 
 int send_file_to_server(char *filename, struct send_rec_args *args);
 int send_file_size(int filesize, struct send_rec_args *args);
-int bin_to_file(char *dest_filename, char ** file_buffer_2d, FILE *fileptr);
-
+int bin_to_file_2d(char *dest_filename, char ** file_buffer_2d, FILE *fileptr);
+int bin_to_file_1d(char *dest_filename, char * file_buffer_1d, FILE *fileptr);
 
 int free_2d(char ** arr, int filesize);
 int get_num_rows(int filesize);
@@ -292,7 +292,7 @@ void str_to_lower(char *buf)
 
 int send_file_to_server(char *filename, struct send_rec_args *args)
 {
-    FILE *fileptr = fopen(filename, "rb");  // Open the file in binary mode
+    FILE *fileptr = fopen(filename, "r");  // Open the file in binary mode
     if(fileptr == NULL)
     {
         fprintf(stderr, "Error opening file: %s\n", filename);
@@ -309,7 +309,8 @@ int send_file_to_server(char *filename, struct send_rec_args *args)
     {
         //printf("READING FILE TO BUFFER\n");
         char **file_buffer_2d = read_file_to_buf(fileptr);
-        bin_to_file("text1.txt", file_buffer_2d, fileptr);
+        bin_to_file_2d("text1.txt", file_buffer_2d, fileptr);
+        
         return 0;
         //send_file_size(filename, args);
     }
@@ -353,14 +354,7 @@ char ** read_file_to_buf(FILE *fileptr)
     int filesize = get_file_size(fileptr);
     char * file_buffer_1d = (char *)calloc(filesize, sizeof(char));
     fread(file_buffer_1d, filesize, 1, fileptr); // Read in the entire file
-    /*
-    for(int i = 0; i < filesize; i++)
-    {
-        printf("%c",file_buffer_1d[i]);
-    }
-    printf("\n");
-    */
-    
+
     char ** file_buffer_2d = calloc_2d(filesize);
     int rows = get_num_rows(filesize);
     printf("NUM ROWS: %d\n", rows);
@@ -418,15 +412,13 @@ int get_num_rows(int filesize)
     return ceil;
 }
 
-//size_t fwrite ( const void * ptr, size_t size, size_t count, FILE * stream );
-int bin_to_file(char *dest_filename, char ** file_buffer_2d, FILE *fileptr)
+int bin_to_file_2d(char *dest_filename, char ** file_buffer_2d, FILE *fileptr)
 {
-    FILE *dest_fileptr = fopen(dest_filename, "wb");
+    FILE *dest_fileptr = fopen(dest_filename, "w");
     if(dest_fileptr == NULL){
         fprintf(stderr, "Error opening dest file.\n");
         return -1;
     }
-    
     int filesize = get_file_size(fileptr);
     int rows = get_num_rows(filesize);
     
@@ -436,30 +428,26 @@ int bin_to_file(char *dest_filename, char ** file_buffer_2d, FILE *fileptr)
     {
         int n_written = 0;
         const char *ptr = &file_buffer_2d[i][16];
-        
-        for(int j = 0; j < BUFSIZE-16; j++)
-        {
-            if(ptr[j] == '\0')
-            {
-                printf("NULL CHAR\n");
-            } 
-            
-            if(ptr[j] != 'a' && ptr[j]!='\n') 
-            {
-                printf("array[%d][%d]: %c ", i, j, ptr[j]);
-            }
-        }
-        //printf("\n");
-        
-        if ((bytes_written + BUFSIZE-16) > bytes_remaining)
+    
+        if ((BUFSIZE-16) > bytes_remaining)
         {
             n_written = fwrite(ptr, sizeof(char), bytes_remaining, dest_fileptr);
             break;
         }
         n_written = fwrite(ptr, sizeof(char), BUFSIZE-16, dest_fileptr);
-        
         bytes_written += n_written;
         bytes_remaining -= n_written;
     }
     
+}
+
+int bin_to_file_1d(char *dest_filename, char * file_buffer_1d, FILE *fileptr)
+{
+    FILE *dest_fileptr = fopen(dest_filename, "w");
+    if(dest_fileptr == NULL){
+        fprintf(stderr, "Error opening dest file.\n");
+        return -1;
+    }
+    int filesize = get_file_size(fileptr);
+    int n_written = fwrite(file_buffer_1d, sizeof(char), filesize, dest_fileptr);
 }
