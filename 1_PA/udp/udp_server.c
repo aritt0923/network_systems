@@ -129,6 +129,7 @@ int main(int argc, char **argv)
     args.clientaddr = &clientaddr;
     args.clientlen = &clientlen;
     args.sockfd = sockfd;
+    
     /*
      * main loop: wait for a datagram, then echo it
      */
@@ -160,25 +161,25 @@ int main(int argc, char **argv)
             error("ERROR on inet_ntoa\n");
         printf("server received datagram from %s (%s)\n",
                hostp->h_name, hostaddrp);
-        printf("server received %ld/%d bytes: %s\n", strlen(buf), n, buf);
+        printf("server received %ld/%d bytes: %s\n", strlen(buf), args.n, buf);
 
         handle_client_cmd(&args);
 
-        /*
-         * sendto: echo the input back to the client
-         */
-        // send_to_client(&args);
-        /*
-        n = sendto(sockfd, buf, strlen(buf), 0,
-                   (struct sockaddr *)&clientaddr, clientlen);
-        if (n < 0)
-            error("ERROR in sendto");
-        */
     }
 }
 
 int rec_from_client(struct send_rec_args *args)
 {
+    
+    // set timeout
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    
+    if (setsockopt(args->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+    {
+        perror("Error");
+    }
     bzero(args->buf, BUFSIZE);
     args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, args->clientaddr, args->clientlen);
     if (args->n < 0)
@@ -210,6 +211,14 @@ int rec_from_client_tmout(struct send_rec_args *args)
             error("Error in recvfrom");
         }
     }
+    //printf("server received %ld/%d bytes: %s\n", strlen(args->buf), args->n, args->buf);
+    
+    
+    for (int i = 0; i < BUFSIZE; i++)
+    {
+        printf("%c", args->buf[i]);
+    }
+    
     // remove timeout
     tv.tv_sec = 0;
     tv.tv_usec = 0;
@@ -228,80 +237,6 @@ int send_to_client(struct send_rec_args *args)
     if (args->n < 0)
         error("ERROR in sendto");
     return *args->clientlen;
-}
-
-int split_client_in(char *buf, char *cmd, char *filename)
-{ /*
-   * split the client command into cmd - filename
-   * if no filename is passed, cmd is set equal to buf
-   */
-
-    // printf("client in is: %s\n", buf);
-    int split_index = -1;
-    for (int i = 0; i < strlen(buf); i++)
-    {
-        if (buf[i] == ' ')
-        {
-            split_index = i;
-            break;
-        }
-    }
-    if (split_index == -1)
-    { // no whitespace was found
-        strncpy(cmd, buf, strlen(buf));
-        return 0;
-    }
-    strncpy(cmd, buf, split_index);
-    cmd[split_index] = '\0';
-    printf("Cmd is: %s\n", cmd);
-
-    int filename_ind = 0;
-    for (int i = split_index + 1; i < strlen(buf); i++)
-    {
-        filename[filename_ind] = buf[i];
-        filename_ind++;
-    }
-    // printf("Filename is: %s\n", filename);
-    return 1;
-}
-
-int validate_client_no_file(char *cmd)
-{ // No filename was passed - validate that cmd is either ls or exit
-    int res = -1;
-    if (strcmp("ls", cmd) == 0)
-    {
-        // printf("Client says 'ls'\n");
-        res = LS;
-    }
-    else if (strcmp("exit", cmd) == 0)
-    {
-        // printf("Client says 'exit'\n");
-        res = EXIT;
-    }
-    return res;
-}
-
-int validate_client_file_op(char *cmd, char *filename)
-{ // Filename was passed - validate that cmd is either get, put, or delete
-
-    int res = -1;
-
-    if (strcmp("get", cmd) == 0)
-    {
-        // printf("Client says 'get'\n");
-        res = GET;
-    }
-    else if (strcmp("put", cmd) == 0)
-    {
-        // printf("Client says 'put'\n");
-        res = PUT;
-    }
-    else if (strcmp("delete", cmd) == 0)
-    {
-        // printf("Client says 'delete'\n");
-        res = DELETE;
-    }
-    return res;
 }
 
 int handle_client_cmd(struct send_rec_args *args)
@@ -409,10 +344,51 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
         fill_buffer_from_client(file_buffer_2d, filesize, args, rows_rec);
     }
     memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SENDSIZE", strlen("SENDSIZE"));
+    strncpy(args->buf, "ALLREC", strlen("ALLREC"));
     send_to_client(args);
-    bin_to_file_2d("server_rec_file", file_buffer_2d, filesize);
+    bin_to_file_2d("server_rec_file.txt", file_buffer_2d, filesize);
 }
+
+
+int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec_args *args, int *rows_rec)
+{
+
+    int res = 0;
+    int num_rows = get_num_rows(filesize);
+    while ((res = rec_from_client_tmout(args)) != TIMEOUT)
+    {
+        if (strncmp("ROW ", args->buf, strlen("ROW ")) != 0)
+        {
+            fprintf(stderr, "In fill_buffer_from_client - Error with pckt recieved\n");
+            return -1;
+        }
+
+        printf("\n");
+        char *str = args->buf;
+        int row_num = -1;
+        int total_rows = -1;
+        if(get_row_num(&str[strlen("ROW ")], &row_num, &total_rows) < 0)
+        {
+            fprintf(stderr, "in fill_buffer_from_client - error with parseLong\n");
+            return -1;
+        }
+        if (row_num == -1 || (row_num > num_rows))
+        {
+            fprintf(stderr, "in fill_buffer_from_client - error recieving row information\n");
+            return -1;
+        }
+        if (num_rows != total_rows)
+        {
+            fprintf(stderr, "in fill_buffer_from_client - error with row %d - wrong number of rows\n", row_num);
+            return -1;
+        }
+        rows_rec[row_num] = 1;
+        copy_row(args->buf, file_buffer_2d[row_num]);
+    }
+
+    return TIMEOUT;
+}
+
 
 int resend_rows(int *rows_rec, int num_rows, struct send_rec_args *args)
 {
@@ -442,44 +418,12 @@ int resend_rows(int *rows_rec, int num_rows, struct send_rec_args *args)
     return resend_again;
 }
 
-int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec_args *args, int *rows_rec)
-{
-
-    int res = 0;
-    int num_rows = get_num_rows(filesize);
-    while ((res = rec_from_client_tmout(args)) != TIMEOUT)
-    {
-        if (strncmp("ROW ", args->buf, strlen("ROW ")) != 0)
-        {
-            fprintf(stderr, "In fill_buffer_from_client - Error with pckt recieved\n");
-            return -1;
-        }
-        char *str = args->buf;
-        int row_num = -1;
-        int total_rows = -1;
-        get_row_num(&str[strlen("ROW ")], &row_num, &total_rows);
-        if (row_num == -1 || (row_num > num_rows))
-        {
-            fprintf(stderr, "in fill_buffer_from_client - error recieving row information\n");
-            return -1;
-        }
-        if (num_rows != total_rows)
-        {
-            fprintf(stderr, "in fill_buffer_from_client - error with row %d - wrong number of rows\n", row_num);
-            return -1;
-        }
-        rows_rec[row_num] = 1;
-        copy_row(args->buf, file_buffer_2d[row_num]);
-    }
-
-    return TIMEOUT;
-}
-
 int copy_row(char *src, char *dest)
 {
     for (int i = 0; i < BUFSIZE; i++)
     {
         dest[i] = src[i];
+        //printf("%c", src[i]);
     }
 }
 
@@ -647,4 +591,80 @@ void str_to_lower(char *buf)
     {
         buf[i] = tolower(buf[i]);
     }
+}
+
+
+int split_client_in(char *buf, char *cmd, char *filename)
+{ /*
+   * split input by white space into two strings
+   *
+   * if no filename is passed, cmd is set equal to buf
+   */
+
+    // printf("client in is: %s\n", buf);
+    int split_index = -1;
+    for (int i = 0; i < strlen(buf); i++)
+    {
+        if (buf[i] == ' ')
+        {
+            split_index = i;
+            break;
+        }
+    }
+    if (split_index == -1)
+    { // no whitespace was found
+        strncpy(cmd, buf, strlen(buf));
+        return 0;
+    }
+    strncpy(cmd, buf, split_index);
+    cmd[split_index] = '\0';
+    //printf("str1 is: %s\n", cmd);
+
+    int filename_ind = 0;
+    for (int i = split_index + 1; i < strlen(buf); i++)
+    {
+        filename[filename_ind] = buf[i];
+        filename_ind++;
+    }    
+    //printf("str1: %s, str2: %s\n", cmd, filename);
+    return 1;
+}
+
+int validate_client_no_file(char *cmd)
+{ // No filename was passed - validate that cmd is either ls or exit
+    int res = -1;
+    if (strcmp("ls", cmd) == 0)
+    {
+        // printf("Client says 'ls'\n");
+        res = LS;
+    }
+    else if (strcmp("exit", cmd) == 0)
+    {
+        // printf("Client says 'exit'\n");
+        res = EXIT;
+    }
+    return res;
+}
+
+int validate_client_file_op(char *cmd, char *filename)
+{ // Filename was passed - validate that cmd is either get, put, or delete
+
+    int res = -1;
+
+    if (strcmp("get", cmd) == 0)
+    {
+        // printf("Client says 'get'\n");
+        res = GET;
+    }
+    else if (strcmp("put", cmd) == 0)
+    {
+        // printf("Client says 'put'\n");
+        res = PUT;
+    }
+    else if (strcmp("delete", cmd) == 0)
+    {
+        // printf("Client says 'delete'\n");
+        res = DELETE;
+    }
+    return res;
 }

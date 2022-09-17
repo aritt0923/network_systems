@@ -47,7 +47,7 @@ int copy_row(char *src, char *dest);
 int free_2d(char **arr, int filesize);
 int get_num_rows(int filesize);
 char **calloc_2d(int filesize);
-char **read_file_to_buf(FILE *fileptr);
+int read_file_to_buf(FILE *fileptr, char**file_buffer_2d);
 int resend_loop(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args);
 int split_server_in(char *buf, char *cmd, char *filename);
 bool parseLong(const char *str, long *val);
@@ -178,9 +178,14 @@ int send_to_server(struct send_rec_args *args)
     /* send the message to the server */
     struct sockaddr_in *serveraddr = args->serveraddr;
     *args->serverlen = sizeof(*serveraddr);
-    args->n = sendto(args->sockfd, args->buf, strlen(args->buf), 0, args->serveraddr, *args->serverlen);
+    args->n = sendto(args->sockfd, args->buf, BUFSIZE, 0, args->serveraddr, *args->serverlen);
     if (args->n < 0)
         error("ERROR in sendto");
+    
+    for (int i = 0; i < BUFSIZE; i++)
+    {
+        printf("%c", args->buf[i]);
+    }
     return *args->serverlen;
 }
 
@@ -322,22 +327,9 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
     }
 }
 
-void strip_newline(char *buf)
-{
-    buf[strcspn(buf, "\n")] = '\0';
-}
-
-void str_to_lower(char *buf)
-{
-    for (int i = 0; buf[i]; i++)
-    {
-        buf[i] = tolower(buf[i]);
-    }
-}
-
 int send_file_to_server(char *filename, struct send_rec_args *args)
 {
-    FILE *fileptr = fopen(filename, "rb"); // Open the file in binary mode
+    FILE *fileptr = fopen(filename, "r"); // Open the file in binary mode
     if (fileptr == NULL)
     {
         fprintf(stderr, "Error opening file: %s\n", filename);
@@ -348,8 +340,9 @@ int send_file_to_server(char *filename, struct send_rec_args *args)
 
     // before we send our request, we prepare everything we need to send the file
     // read the file to a 2d array (each row will be a packet)
-    char **file_buffer_2d = read_file_to_buf(fileptr);
+    char **file_buffer_2d = calloc_2d(filesize);
     fill_metadata(file_buffer_2d, num_rows);
+    read_file_to_buf(fileptr, file_buffer_2d);
     // initialize an array to keep track of which rows we need to send
     // (will be used to resend dropped packets later)
     int *rows_to_send = calloc(num_rows, sizeof(int));
@@ -380,7 +373,7 @@ int send_file_to_server(char *filename, struct send_rec_args *args)
     if (strncmp("SENDFILE", args->buf, strlen("SENDFILE")) == 0)
     {
         send_rows(file_buffer_2d, rows_to_send, num_rows, args);
-        memset(rows_to_send, 1, num_rows * sizeof(int));
+        memset(rows_to_send, 0, num_rows * sizeof(int));
     }
     else
     {
@@ -390,7 +383,9 @@ int send_file_to_server(char *filename, struct send_rec_args *args)
     while (resend_loop(file_buffer_2d, rows_to_send, num_rows, args) > 0)
     {
         send_rows(file_buffer_2d, rows_to_send, num_rows, args);
+        memset(rows_to_send, 0, num_rows * sizeof(int));
     }
+    bin_to_file_2d("client_copy.txt", file_buffer_2d, filesize);
 }
 
 int resend_loop(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args)
@@ -423,44 +418,8 @@ int resend_loop(char **file_buffer_2d, int *rows_to_send, int num_rows, struct s
     return 1;
 }
 
-int split_server_in(char *buf, char *cmd, char *filename)
-{ /*
-   * split the client command into cmd - filename
-   * if no filename is passed, cmd is set equal to buf
-   */
-
-    // printf("client in is: %s\n", buf);
-    int split_index = -1;
-    for (int i = 0; i < strlen(buf); i++)
-    {
-        if (buf[i] == ' ')
-        {
-            split_index = i;
-            break;
-        }
-    }
-    if (split_index == -1)
-    { // no whitespace was found
-        strncpy(cmd, buf, strlen(buf));
-        return 0;
-    }
-    strncpy(cmd, buf, split_index);
-    cmd[split_index] = '\0';
-    printf("Cmd is: %s\n", cmd);
-
-    int filename_ind = 0;
-    for (int i = split_index + 1; i < strlen(buf); i++)
-    {
-        filename[filename_ind] = buf[i];
-        filename_ind++;
-    }
-    // printf("Filename is: %s\n", filename);
-    return 1;
-}
-
 int fill_metadata(char **file_buffer_2d, int num_rows)
 {
-    
         
     if (num_rows > 999999999)
     {
@@ -485,6 +444,8 @@ int fill_metadata(char **file_buffer_2d, int num_rows)
         strncat(buf, " ", strlen(" "));
         
         strncat(buf, num_rows_str, strlen(num_rows_str));
+        strncat(buf, " ", strlen(" "));
+        //printf("buf is: %s\n", buf);
     }
 }
 
@@ -492,20 +453,32 @@ int send_rows(char **file_buffer_2d, int *rows_to_send, int num_rows, struct sen
 {
     for (int i = 0; i < num_rows; i++)
     {
-        if (i)
+        if (rows_to_send[i])
         {
             memset(args->buf, '\0', BUFSIZE);
             copy_row(file_buffer_2d[i], args->buf);
+            /*
+            printf("buf is:\n");
+            for(int j = 0; j < BUFSIZE; j++)
+            {
+                printf("%c", args->buf[j]);
+            }
+            printf("\n");
+            */
+            //printf("arr row is: %s\n", file_buffer_2d[i]);
             send_to_server(args);
         }
     }
 }
+
+
 
 int copy_row(char *src, char *dest)
 {
     for (int i = 0; i < BUFSIZE; i++)
     {
         dest[i] = src[i];
+        //printf("%c", src[i]);
     }
 }
 
@@ -526,7 +499,7 @@ int send_file_size(FILE *fileptr, struct send_rec_args *args)
     free(filesize_buf);
 }
 
-char **read_file_to_buf(FILE *fileptr)
+int read_file_to_buf(FILE *fileptr, char**file_buffer_2d)
 {
     // dynamically allocates a 2d array and reads a file into it
     // row by row. The first 16 bytes of each row are reserved for metadata
@@ -534,7 +507,6 @@ char **read_file_to_buf(FILE *fileptr)
     char *file_buffer_1d = (char *)calloc(filesize, sizeof(char));
     fread(file_buffer_1d, filesize, 1, fileptr); // Read in the entire file
 
-    char **file_buffer_2d = calloc_2d(filesize);
     int rows = get_num_rows(filesize);
     // printf("NUM ROWS: %d\n", rows);
     // printf("FILESIZE %d\n", filesize);
@@ -555,7 +527,7 @@ char **read_file_to_buf(FILE *fileptr)
         }
     }
     free(file_buffer_1d);
-    return file_buffer_2d;
+    return 0;
 }
 
 char **calloc_2d(int filesize)
@@ -655,4 +627,52 @@ bool parseLong(const char *str, long *val)
         rc = false;
 
     return rc;
+}
+
+int split_server_in(char *buf, char *cmd, char *filename)
+{ /*
+   * split the client command into cmd - filename
+   * if no filename is passed, cmd is set equal to buf
+   */
+
+    // printf("client in is: %s\n", buf);
+    int split_index = -1;
+    for (int i = 0; i < strlen(buf); i++)
+    {
+        if (buf[i] == ' ')
+        {
+            split_index = i;
+            break;
+        }
+    }
+    if (split_index == -1)
+    { // no whitespace was found
+        strncpy(cmd, buf, strlen(buf));
+        return 0;
+    }
+    strncpy(cmd, buf, split_index);
+    cmd[split_index] = '\0';
+    printf("Cmd is: %s\n", cmd);
+
+    int filename_ind = 0;
+    for (int i = split_index + 1; i < strlen(buf); i++)
+    {
+        filename[filename_ind] = buf[i];
+        filename_ind++;
+    }
+    // printf("Filename is: %s\n", filename);
+    return 1;
+}
+
+void strip_newline(char *buf)
+{
+    buf[strcspn(buf, "\n")] = '\0';
+}
+
+void str_to_lower(char *buf)
+{
+    for (int i = 0; buf[i]; i++)
+    {
+        buf[i] = tolower(buf[i]);
+    }
 }
