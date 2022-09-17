@@ -13,6 +13,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <limits.h>
+#include <errno.h>
+#include <stdbool.h>
 
 struct send_rec_args
 {
@@ -20,7 +23,7 @@ struct send_rec_args
     int sockfd;
     char *buf;
     int *serverlen;
-    int n; //size of message sent or recieved
+    int n; // size of message sent or recieved
 };
 
 int rec_from_server(struct send_rec_args *args);
@@ -33,17 +36,23 @@ int split_usr_in(char *buf, char *cmd, char *filename);
 int cmd_switch(int res, char *filename, struct send_rec_args *args);
 void strip_newline(char *buf);
 void str_to_lower(char *buf);
+int get_file_size(FILE *fileptr);
 
 int send_file_to_server(char *filename, struct send_rec_args *args);
-int send_file_size(int filesize, struct send_rec_args *args);
-int bin_to_file_2d(char *dest_filename, char ** file_buffer_2d, FILE *fileptr);
-int bin_to_file_1d(char *dest_filename, char * file_buffer_1d, FILE *fileptr);
-
-int free_2d(char ** arr, int filesize);
+int send_file_size(FILE *fileptr, struct send_rec_args *args);
+int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize);
+int bin_to_file_1d(char *dest_filename, char *file_buffer_1d, FILE *fileptr);
+int send_rows(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args);
+int copy_row(char *src, char *dest);
+int free_2d(char **arr, int filesize);
 int get_num_rows(int filesize);
-char ** calloc_2d(int filesize);
-char ** read_file_to_buf(FILE *fileptr);
-
+char **calloc_2d(int filesize);
+char **read_file_to_buf(FILE *fileptr);
+int resend_loop(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args);
+int split_server_in(char *buf, char *cmd, char *filename);
+bool parseLong(const char *str, long *val);
+int fill_metadata(char **file_buffer_2d, int num_rows);
+int rec_from_server_tmout(struct send_rec_args *args);
 
 #define BUFSIZE 1024
 #define GET 1
@@ -51,6 +60,7 @@ char ** read_file_to_buf(FILE *fileptr);
 #define DELETE 3
 #define LS 4
 #define EXIT 5
+#define TIMEOUT -3
 
 /*
  * error - wrapper for perror
@@ -127,7 +137,40 @@ int rec_from_server(struct send_rec_args *args)
     args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, args->serveraddr, args->serverlen);
     if (args->n < 0)
         error("ERROR in recvfrom");
-    //printf("Echo from server: %s", args->buf);
+    // printf("Echo from server: %s", args->buf);
+}
+
+int rec_from_server_tmout(struct send_rec_args *args)
+{
+    // set timeout
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+    if (setsockopt(args->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+    {
+        perror("Error");
+    }
+    bzero(args->buf, BUFSIZE);
+    args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, args->serveraddr, args->serverlen);
+    if (args->n < 0)
+    {
+        if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ETIMEDOUT))
+        {
+            return TIMEOUT;
+        }
+        else
+        {
+            return -1;
+            error("Error in recvfrom");
+        }
+    }
+    // remove timeout
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    if (setsockopt(args->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+    {
+        perror("Error");
+    }
 }
 
 int send_to_server(struct send_rec_args *args)
@@ -258,7 +301,9 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
         break;
 
     case PUT:
-        while ((res = send_file_to_server(filename, args)) < 0){}
+        while ((res = send_file_to_server(filename, args)) < 0)
+        {
+        }
         break;
 
     case DELETE:
@@ -292,109 +337,244 @@ void str_to_lower(char *buf)
 
 int send_file_to_server(char *filename, struct send_rec_args *args)
 {
-    FILE *fileptr = fopen(filename, "r");  // Open the file in binary mode
-    if(fileptr == NULL)
+    FILE *fileptr = fopen(filename, "rb"); // Open the file in binary mode
+    if (fileptr == NULL)
     {
         fprintf(stderr, "Error opening file: %s\n", filename);
         return 1;
     }
-    
-    memset(args->buf, '\0', strlen(args->buf));
+    int filesize = get_file_size(fileptr);
+    int num_rows = get_num_rows(filesize);
+
+    // before we send our request, we prepare everything we need to send the file
+    // read the file to a 2d array (each row will be a packet)
+    char **file_buffer_2d = read_file_to_buf(fileptr);
+    fill_metadata(file_buffer_2d, num_rows);
+    // initialize an array to keep track of which rows we need to send
+    // (will be used to resend dropped packets later)
+    int *rows_to_send = calloc(num_rows, sizeof(int));
+    // we need to send them all at first
+    memset(rows_to_send, 1, num_rows * sizeof(int));
+    // finally, reply to the server with the filesize
+
+    // zero the buffer and ensure that we're sending the message we want
+    memset(args->buf, '\0', BUFSIZE);
     strncpy(args->buf, "put ", strlen("put "));
     strncat(args->buf, filename, strlen(filename));
+
+    // sending "put [filename]"
     send_to_server(args);
+    // looking for "SENDSIZE"
     rec_from_server(args);
-    
-    if(strncmp("SENDSIZE", args->buf, strlen("SENDSIZE")) == 0)
+    if (strncmp("SENDSIZE", args->buf, strlen("SENDSIZE")) == 0)
     {
-        //printf("READING FILE TO BUFFER\n");
-        char **file_buffer_2d = read_file_to_buf(fileptr);
-        bin_to_file_2d("text1.txt", file_buffer_2d, fileptr);
-        
-        return 0;
-        //send_file_size(filename, args);
+        send_file_size(fileptr, args);
     }
-    /*
     else
     {
         fprintf(stderr, "Error with ack from server: expected SENDFILESIZE\n");
         return -1;
     }
-    
+    // looking for SENDFILE
     rec_from_server(args);
-    if(strncmp("SENDFILE", args->buf, strlen("SENDFILE")) == 0)
+    if (strncmp("SENDFILE", args->buf, strlen("SENDFILE")) == 0)
     {
+        send_rows(file_buffer_2d, rows_to_send, num_rows, args);
+        memset(rows_to_send, 1, num_rows * sizeof(int));
     }
     else
     {
         fprintf(stderr, "Error with ack from server: expected SENDSIZE\n");
         return -1;
     }
-    */
-    
+    while (resend_loop(file_buffer_2d, rows_to_send, num_rows, args) > 0)
+    {
+        send_rows(file_buffer_2d, rows_to_send, num_rows, args);
+    }
 }
 
-int send_file_size(int filesize, struct send_rec_args *args)
+int resend_loop(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args)
 {
+    int rec_res;
+    while((rec_res = rec_from_server_tmout(args) != TIMEOUT))
+    {
+        if (strncmp("ALLREC", args->buf, strlen("ALLREC")) == 0)
+        {
+            return 0;
+        }
 
-    
-    
+        if (strncmp("RESEND ", args->buf, strlen("RESEND ")) == 0)
+        {
+            char *row_num_str = &args->buf[strlen("RESEND ")];
+            int *row_num;
+            if(!parseLong(row_num_str, row_num))
+            {
+                fprintf(stderr, "Error parsing row number from resend_loop\n");
+                return -1;
+            }
+            if(*row_num >= num_rows)
+            {
+                fprintf(stderr, "Error with row number from resend_loop (to large)\n");
+                return -1;
+            }
+            rows_to_send[*row_num] = 1; 
+        }
+    }
+    return 1;
 }
 
-int get_file_size(FILE *fileptr)
-{
-    fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
-    int filelen = ftell(fileptr);             // Get the current byte offset in the file    
-    rewind(fileptr);                      // Jump back to the beginning of the file
-    return filelen;
+int split_server_in(char *buf, char *cmd, char *filename)
+{ /*
+   * split the client command into cmd - filename
+   * if no filename is passed, cmd is set equal to buf
+   */
+
+    // printf("client in is: %s\n", buf);
+    int split_index = -1;
+    for (int i = 0; i < strlen(buf); i++)
+    {
+        if (buf[i] == ' ')
+        {
+            split_index = i;
+            break;
+        }
+    }
+    if (split_index == -1)
+    { // no whitespace was found
+        strncpy(cmd, buf, strlen(buf));
+        return 0;
+    }
+    strncpy(cmd, buf, split_index);
+    cmd[split_index] = '\0';
+    printf("Cmd is: %s\n", cmd);
+
+    int filename_ind = 0;
+    for (int i = split_index + 1; i < strlen(buf); i++)
+    {
+        filename[filename_ind] = buf[i];
+        filename_ind++;
+    }
+    // printf("Filename is: %s\n", filename);
+    return 1;
 }
 
-char ** read_file_to_buf(FILE *fileptr)
+int fill_metadata(char **file_buffer_2d, int num_rows)
 {
+    
+        
+    if (num_rows > 999999999)
+    {
+        fprintf(stderr, "filesize way to big\n");
+        return -1;
+    }
+    
+    // alloc the string
+    char num_rows_str[10];
+    // copy it over
+    sprintf(num_rows_str, "%d", num_rows);
+
+    for (int i = 0; i < num_rows; i++)
+    {
+        char *buf = file_buffer_2d[i];
+        strncpy(buf, "ROW ", strlen("ROW "));
+        // alloc the string
+        char row_num_str[10];
+        // copy it over
+        sprintf(row_num_str, "%d", i);
+        strncat(buf, row_num_str, strlen(row_num_str));
+        strncat(buf, " ", strlen(" "));
+        
+        strncat(buf, num_rows_str, strlen(num_rows_str));
+    }
+}
+
+int send_rows(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args)
+{
+    for (int i = 0; i < num_rows; i++)
+    {
+        if (i)
+        {
+            memset(args->buf, '\0', BUFSIZE);
+            copy_row(file_buffer_2d[i], args->buf);
+            send_to_server(args);
+        }
+    }
+}
+
+int copy_row(char *src, char *dest)
+{
+    for (int i = 0; i < BUFSIZE; i++)
+    {
+        dest[i] = src[i];
+    }
+}
+
+int send_file_size(FILE *fileptr, struct send_rec_args *args)
+{
+    memset(args->buf, '\0', BUFSIZE);
     int filesize = get_file_size(fileptr);
-    char * file_buffer_1d = (char *)calloc(filesize, sizeof(char));
+    strncpy(args->buf, "FILESIZE ", strlen("FILESIZE "));
+    // get number of chars needed to hold filesize as string
+    int filesize_str_len = snprintf(NULL, 0, "%d", filesize);
+    // alloc the string
+    char *filesize_buf = calloc(filesize_str_len, sizeof(char));
+    // copy it over
+    sprintf(filesize_buf, "%d", filesize);
+    strncat(args->buf, filesize_buf, strlen(filesize_buf));
+    send_to_server(args);
+    memset(filesize_buf, '\0', strlen(filesize_buf));
+    free(filesize_buf);
+}
+
+char **read_file_to_buf(FILE *fileptr)
+{
+    // dynamically allocates a 2d array and reads a file into it
+    // row by row. The first 16 bytes of each row are reserved for metadata
+    int filesize = get_file_size(fileptr);
+    char *file_buffer_1d = (char *)calloc(filesize, sizeof(char));
     fread(file_buffer_1d, filesize, 1, fileptr); // Read in the entire file
 
-    char ** file_buffer_2d = calloc_2d(filesize);
+    char **file_buffer_2d = calloc_2d(filesize);
     int rows = get_num_rows(filesize);
-    printf("NUM ROWS: %d\n", rows);
-    printf("FILESIZE %d\n", filesize);
-    
-    
+    // printf("NUM ROWS: %d\n", rows);
+    // printf("FILESIZE %d\n", filesize);
+
     int ind_1d = 0;
     for (int i = 0; i < rows; i++)
     {
-        for (int j = 16; j <BUFSIZE; j++)
+        for (int j = 16; j < BUFSIZE; j++)
         {
-            if(ind_1d == filesize)
+            if (ind_1d == filesize)
             {
-                //make sure the outer loop breaks
-                i = rows; 
+                // make sure the outer loop breaks
+                i = rows;
                 break;
             }
             file_buffer_2d[i][j] = file_buffer_1d[ind_1d];
-            ind_1d ++;
+            ind_1d++;
         }
     }
     free(file_buffer_1d);
-    return file_buffer_2d;  
+    return file_buffer_2d;
 }
 
-char ** calloc_2d(int filesize)
+char **calloc_2d(int filesize)
 {
+    // dynamically allocates a 2d_array based on the size of the file
     int rows = get_num_rows(filesize);
 
-    char** arr = (char**)calloc(rows, sizeof(char*));
+    char **arr = (char **)calloc(rows, sizeof(char *));
     for (int i = 0; i < rows; i++)
-        arr[i] = (char*)calloc(BUFSIZE, sizeof(char));
-    
+        arr[i] = (char *)calloc(BUFSIZE, sizeof(char));
+
     return arr;
 }
 
-int free_2d(char ** arr, int filesize)
+int free_2d(char **arr, int filesize)
 {
+    // frees the dynamically allocated 2d_arr
     int rows = get_num_rows(filesize);
-    for(int i = 0; i < rows; i++)
+    for (int i = 0; i < rows; i++)
     {
         free(arr[i]);
     }
@@ -403,51 +583,76 @@ int free_2d(char ** arr, int filesize)
 
 int get_num_rows(int filesize)
 {
-
-    int row_len = BUFSIZE-16;
+    // takes filesize and returns the number of rows we need in a 2d array
+    int row_len = BUFSIZE - 16;
     int filesize_db = filesize;
-    
+
     int ceil = (filesize + row_len - 1) / row_len;
 
     return ceil;
 }
 
-int bin_to_file_2d(char *dest_filename, char ** file_buffer_2d, FILE *fileptr)
+int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
 {
-    FILE *dest_fileptr = fopen(dest_filename, "w");
-    if(dest_fileptr == NULL){
+    // accepts a 2d char array filled with binary file data
+    // and reads that data into a file
+    FILE *dest_fileptr = fopen(dest_filename, "wb");
+    if (dest_fileptr == NULL)
+    {
         fprintf(stderr, "Error opening dest file.\n");
         return -1;
     }
-    int filesize = get_file_size(fileptr);
     int rows = get_num_rows(filesize);
-    
+
     int bytes_written = 0;
     int bytes_remaining = filesize;
-    for (int i =0; i < rows; i++)
+    for (int i = 0; i < rows; i++)
     {
         int n_written = 0;
+        // first 16 chars of each row are reserved for metadata
         const char *ptr = &file_buffer_2d[i][16];
-    
-        if ((BUFSIZE-16) > bytes_remaining)
+
+        if ((BUFSIZE - 16) > bytes_remaining)
         {
             n_written = fwrite(ptr, sizeof(char), bytes_remaining, dest_fileptr);
             break;
         }
-        n_written = fwrite(ptr, sizeof(char), BUFSIZE-16, dest_fileptr);
+        n_written = fwrite(ptr, sizeof(char), BUFSIZE - 16, dest_fileptr);
         bytes_written += n_written;
         bytes_remaining -= n_written;
     }
-    
 }
 
-int bin_to_file_1d(char *dest_filename, char * file_buffer_1d, FILE *fileptr)
+int bin_to_file_1d(char *dest_filename, char *file_buffer_1d, FILE *fileptr)
 {
     FILE *dest_fileptr = fopen(dest_filename, "w");
-    if(dest_fileptr == NULL){
+    if (dest_fileptr == NULL)
+    {
         fprintf(stderr, "Error opening dest file.\n");
         return -1;
     }
     int filesize = get_file_size(fileptr);
     int n_written = fwrite(file_buffer_1d, sizeof(char), filesize, dest_fileptr);
+}
+
+int get_file_size(FILE *fileptr)
+{
+    fseek(fileptr, 0, SEEK_END);  // Jump to the end of the file
+    int filelen = ftell(fileptr); // Get the current byte offset in the file
+    rewind(fileptr);              // Jump back to the beginning of the file
+    return filelen;
+}
+
+bool parseLong(const char *str, long *val)
+{
+    char *temp;
+    bool rc = true;
+    errno = 0;
+    *val = strtol(str, &temp, 0);
+
+    if (temp == str ||
+        ((*val == LONG_MIN || *val == LONG_MAX) && errno == ERANGE))
+        rc = false;
+
+    return rc;
 }
