@@ -71,7 +71,7 @@ int get_file_size(FILE *fileptr);
 int get_num_rows(int filesize);
 bool parseLong(const char *str, int *val);
 
-#define BUFSIZE 1024
+#define BUFSIZE 2048
 #define GET 1
 #define PUT 2
 #define DELETE 3
@@ -338,6 +338,7 @@ int send_file_to_client(char *filename, struct send_rec_args *args)
     {
         fprintf(stderr, "Error with ack from client: expected SENDSIZE\n");
         free_2d(file_buffer_2d, filesize);
+        free(rows_to_send);
 
         return -1;
     }
@@ -348,6 +349,8 @@ int send_file_to_client(char *filename, struct send_rec_args *args)
     }
     // bin_to_file_2d("client_copy.txt", file_buffer_2d, filesize);
     free_2d(file_buffer_2d, filesize);
+    free(rows_to_send);
+    fclose(fileptr);
     return 0;
 }
 
@@ -632,6 +635,7 @@ int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
         bytes_remaining -= n_written;
     }
     rewind(dest_fileptr); // Jump back to the beginning of the file
+    fclose(dest_fileptr);
 
     return 0;
 }
@@ -836,9 +840,16 @@ int handle_client_cmd(struct send_rec_args *args)
 { // process the clients command
     strip_newline(args->buf);
     str_to_lower(args->buf);
+    if(strlen(args->buf) > 25)
+    {
+        fprintf(stderr, "cmd too long\n");
+        return -1;
+    }
 
-    char cmd[BUFSIZE];
-    char filename[BUFSIZE];
+    char cmd[50];
+    memset(cmd, '\0', 50);
+    char filename[50];
+    memset(filename, '\0', 50);
     int rec_filename = 0;
     if ((rec_filename = split_cmd(args->buf, cmd, filename)) < 0)
     { // error with split_cmd
