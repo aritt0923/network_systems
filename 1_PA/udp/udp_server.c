@@ -22,12 +22,59 @@
 
 struct send_rec_args
 {
-    struct sockadd_in *clientaddr;
+    struct sockaddr_in *clientaddr;
     int sockfd;
     char *buf;
     int *clientlen;
     int n; // size of message sent or recieved
 };
+
+
+
+// send / rec packets
+int send_to_client(struct send_rec_args *args);
+int rec_from_client(struct send_rec_args *args);
+int rec_from_client_tmout(struct send_rec_args *args);
+
+// send status
+int send_fail(struct send_rec_args *args);
+int send_success(struct send_rec_args *args);
+
+//switch functions
+int rec_file_from_client(char *filename, struct send_rec_args *args);
+int send_file_to_client(char *filename, struct send_rec_args *args);
+int delete_file(char *filename, struct send_rec_args *args);
+int ls(struct send_rec_args *args);
+int client_exit(struct send_rec_args *args);
+
+// handle client input
+int validate_client_no_file(char *buf);
+int validate_client_file_op(char *buf);
+int handle_client_cmd(struct send_rec_args *args);
+int cmd_switch(int res, char *filename, struct send_rec_args *args);
+int parse_rec_filesize(struct send_rec_args *args);
+int split_cmd(char *buf, char *cmd, char *filename);
+int get_row_num(char *buf, int *row_num, int *total_rows);
+
+// send / rec files
+char **calloc_2d(int filesize);
+int fill_metadata(char **file_buffer_2d, int num_rows);
+int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec_args *args, int *rows_rec);
+int read_file_to_buf(FILE *fileptr, char **file_buffer_2d);
+int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize);
+int send_file_size(FILE *fileptr, struct send_rec_args *args);
+int send_rows(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args);
+int copy_row(char *src, char *dest);
+int listen_for_resend(int *rows_to_send, int num_rows, struct send_rec_args *args);
+int free_2d(char **arr, int filesize);
+int req_resend(int *rows_rec, int num_rows, struct send_rec_args *args);
+
+// basic utilities
+void strip_newline(char *buf);
+void str_to_lower(char *buf);
+int get_file_size(FILE *fileptr);
+int get_num_rows(int filesize);
+bool parseLong(const char *str, int *val);
 
 #define BUFSIZE 1024
 #define GET 1
@@ -35,27 +82,8 @@ struct send_rec_args
 #define DELETE 3
 #define LS 4
 #define EXIT 5
-#define TIMEOUT -3
+#define TIMEOUT 9
 
-int validate_client_no_file(char *buf);
-int validate_client_file_op(char *buf, char *filename);
-int handle_client_cmd(struct send_rec_args *args);
-void strip_newline(char *buf);
-void str_to_lower(char *buf);
-int split_client_in(char *buf, char *cmd, char *filename);
-int cmd_switch(int res, char *filename, struct send_rec_args *args);
-int rec_file_from_client(char *filename, struct send_rec_args *args);
-int parse_rec_filesize(struct send_rec_args *args);
-bool parseLong(const char *str, long *val);
-char **calloc_2d(int filesize);
-int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec_args *args, int *rows_rec);
-int rec_from_client(struct send_rec_args *args);
-int get_file_size(FILE *fileptr);
-int get_num_rows(int filesize);
-int rec_from_client_tmout(struct send_rec_args *args);
-int get_row_num(char *buf, int *row_num, int *total_rows);
-int copy_row(char *src, char *dest);
-int resend_rows(int *rows_rec, int num_rows, struct send_rec_args *args);
 /*
  * error - wrapper for perror
  */
@@ -76,7 +104,7 @@ int main(int argc, char **argv)
     char buf[BUFSIZE];             /* message buf */
     char *hostaddrp;               /* dotted decimal host addr string */
     int optval;                    /* flag value for setsockopt */
-    int n;                         /* message byte size */
+    int n = 0;                         /* message byte size */
 
     /*
      * check command line arguments
@@ -129,6 +157,7 @@ int main(int argc, char **argv)
     args.clientaddr = &clientaddr;
     args.clientlen = &clientlen;
     args.sockfd = sockfd;
+    args.n = n;
     
     /*
      * main loop: wait for a datagram, then echo it
@@ -140,6 +169,7 @@ int main(int argc, char **argv)
         /*
          * recvfrom: receive a UDP datagram from a client
          */
+        memset(args.buf, '\0', BUFSIZE);
         rec_from_client(&args);
         /*
         bzero(buf, BUFSIZE);
@@ -159,14 +189,14 @@ int main(int argc, char **argv)
         hostaddrp = inet_ntoa(clientaddr.sin_addr);
         if (hostaddrp == NULL)
             error("ERROR on inet_ntoa\n");
-        printf("server received datagram from %s (%s)\n",
-               hostp->h_name, hostaddrp);
-        printf("server received %ld/%d bytes: %s\n", strlen(buf), args.n, buf);
+        //printf("server received datagram from %s (%s)\n", hostp->h_name, hostaddrp);
+        //printf("server received %ld/%d bytes: %s\n", strlen(buf), args.n, buf);
 
         handle_client_cmd(&args);
-
     }
+    return 0;
 }
+
 
 int rec_from_client(struct send_rec_args *args)
 {
@@ -181,10 +211,12 @@ int rec_from_client(struct send_rec_args *args)
         perror("Error");
     }
     bzero(args->buf, BUFSIZE);
-    args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, args->clientaddr, args->clientlen);
+    args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, (struct sockaddr *)args->clientaddr, (socklen_t *)args->clientlen);
     if (args->n < 0)
         error("ERROR in recvfrom");
     // printf("Echo from client: %s --END\n", args->buf);
+    return 0;
+    
 }
 
 int rec_from_client_tmout(struct send_rec_args *args)
@@ -198,7 +230,7 @@ int rec_from_client_tmout(struct send_rec_args *args)
         perror("Error");
     }
     bzero(args->buf, BUFSIZE);
-    args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, args->clientaddr, args->clientlen);
+    args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, (struct sockaddr *)args->clientaddr, (socklen_t *)args->clientlen);
     if (args->n < 0)
     {
         if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ETIMEDOUT))
@@ -211,21 +243,7 @@ int rec_from_client_tmout(struct send_rec_args *args)
             error("Error in recvfrom");
         }
     }
-    //printf("server received %ld/%d bytes: %s\n", strlen(args->buf), args->n, args->buf);
-    
-    
-    for (int i = 0; i < BUFSIZE; i++)
-    {
-        printf("%c", args->buf[i]);
-    }
-    
-    // remove timeout
-    tv.tv_sec = 0;
-    tv.tv_usec = 0;
-    if (setsockopt(args->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-    {
-        perror("Error");
-    }
+    return 0;
 }
 
 int send_to_client(struct send_rec_args *args)
@@ -233,43 +251,24 @@ int send_to_client(struct send_rec_args *args)
     /* send the message to the client */
     struct sockaddr_in *clientaddr = args->clientaddr;
     *args->clientlen = sizeof(*clientaddr);
-    args->n = sendto(args->sockfd, args->buf, strlen(args->buf), 0, args->clientaddr, *args->clientlen);
+    args->n = sendto(args->sockfd, args->buf, BUFSIZE, 0, (struct sockaddr *)args->clientaddr, *args->clientlen);
     if (args->n < 0)
         error("ERROR in sendto");
     return *args->clientlen;
 }
 
-int handle_client_cmd(struct send_rec_args *args)
-{ // process the clients command
-    strip_newline(args->buf);
-    str_to_lower(args->buf);
+int send_fail(struct send_rec_args *args)
+{
+    memset(args->buf, '\0', BUFSIZE);
+    strncpy(args->buf, "FAIL", strlen("FAIL"));
+    send_to_client(args);
+}
 
-    char *cmd = calloc(strlen(args->buf), sizeof(char));
-    char *filename = calloc(strlen(args->buf), sizeof(char));
-    int rec_filename = 0;
-    if ((rec_filename = split_client_in(args->buf, cmd, filename)) < 0)
-    { // error with split_client_in
-        return -1;
-    }
-    // validate the clients commands
-    int res = -1;
-    if (rec_filename)
-    {
-        if ((res = validate_client_file_op(cmd, filename)) < 0)
-        {
-            fprintf(stderr, "Error with validate_client_file_op\n");
-            return -1;
-        }
-    }
-    else
-    {
-        if ((res = validate_client_no_file(cmd)) < 0)
-        {
-            fprintf(stderr, "Error with validate_client_no_file\n");
-            return -1;
-        }
-    }
-    return (cmd_switch(res, filename, args));
+int send_success(struct send_rec_args *args)
+{
+    memset(args->buf, '\0', BUFSIZE);
+    strncpy(args->buf, "SUCCESS", strlen("SUCCESS"));
+    send_to_client(args);
 }
 
 int cmd_switch(int res, char *filename, struct send_rec_args *args)
@@ -278,7 +277,7 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
     {
 
     case GET:
-
+        send_file_to_client(filename, args);
         break;
 
     case PUT:
@@ -286,12 +285,15 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
         break;
 
     case DELETE:
+        delete_file(filename, args);
         break;
 
     case LS:
+        ls(args);
         break;
 
     case EXIT:
+        client_exit(args);
         break;
 
     /* you can have any number of case statements */
@@ -299,6 +301,178 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
         fprintf(stderr, "Unrecognized cmd passed to cmd_switch\n");
         return -1;
     }
+    return 0;
+}
+
+int delete_file(char *filename, struct send_rec_args *args)
+{
+    
+}
+
+int ls(struct send_rec_args *args)
+{
+    
+}
+
+int client_exit(struct send_rec_args *args)
+{
+    
+}
+
+int send_file_to_client(char *filename, struct send_rec_args *args)
+{
+    printf("in send_file_to_client\n");
+    FILE *fileptr = fopen(filename, "rb"); // Open the file in binary mode
+    if (fileptr == NULL)
+    {
+        fprintf(stderr, "Error opening file: %s\n", filename);
+        send_fail(args);
+        return 1;
+    }
+    int filesize = get_file_size(fileptr);
+    int num_rows = get_num_rows(filesize);
+
+    // before we send our request, we prepare everything we need to send the file
+    // read the file to a 2d array (each row will be a packet)
+    char **file_buffer_2d = calloc_2d(filesize);
+    fill_metadata(file_buffer_2d, num_rows);
+    read_file_to_buf(fileptr, file_buffer_2d);
+    // initialize an array to keep track of which rows we need to send
+    // (will be used to resend dropped packets later)
+    int *rows_to_send = calloc(num_rows, sizeof(int));
+    // we need to send them all at first
+    memset(rows_to_send, 1, num_rows * sizeof(int));
+    printf("sending filesize to client\n");
+    send_file_size(fileptr, args);
+    
+    // looking for SENDFILE
+    printf("waiting for sendfile\n");
+    rec_from_client(args);
+    printf("got sendfile\n");
+    
+    if (strncmp("SENDFILE", args->buf, strlen("SENDFILE")) == 0)
+    {
+        send_rows(file_buffer_2d, rows_to_send, num_rows, args);
+        memset(rows_to_send, 0, num_rows * sizeof(int));
+    }
+    else
+    {
+        fprintf(stderr, "Error with ack from client: expected SENDSIZE\n");
+        free_2d(file_buffer_2d, filesize);
+        
+        return -1;
+    }
+    while (listen_for_resend(rows_to_send, num_rows, args) > 0)
+    {
+        printf("in this loop\n");
+        send_rows(file_buffer_2d, rows_to_send, num_rows, args);
+        memset(rows_to_send, 0, num_rows * sizeof(int));
+    }
+    printf("finished sending file to client\n");
+    //bin_to_file_2d("client_copy.txt", file_buffer_2d, filesize);
+    free_2d(file_buffer_2d, filesize);
+    return 0;
+    
+}
+
+
+int send_file_size(FILE *fileptr, struct send_rec_args *args)
+{
+    memset(args->buf, '\0', BUFSIZE);
+    int filesize = get_file_size(fileptr);
+    strncpy(args->buf, "FILESIZE ", strlen("FILESIZE "));
+    // get number of chars needed to hold filesize as string
+    int filesize_str_len = snprintf(NULL, 0, "%d", filesize);
+    // alloc the string
+    char *filesize_buf = calloc(filesize_str_len, sizeof(char));
+    // copy it over
+    sprintf(filesize_buf, "%d", filesize);
+    strncat(args->buf, filesize_buf, strlen(filesize_buf));
+    strncat(args->buf, " ", strlen(" ")+1 );
+    send_to_client(args);
+    memset(filesize_buf, '\0', strlen(filesize_buf));
+    free(filesize_buf);
+    return 0;
+}
+
+int fill_metadata(char **file_buffer_2d, int num_rows)
+{
+
+    if (num_rows > 999999999)
+    {
+        fprintf(stderr, "filesize way to big\n");
+        return -1;
+    }
+
+    // alloc the string
+    char num_rows_str[10];
+    // copy it over
+    sprintf(num_rows_str, "%d", num_rows);
+
+    for (int i = 0; i < num_rows; i++)
+    {
+        char *buf = file_buffer_2d[i];
+        strncpy(buf, "ROW ", strlen("ROW "));
+        // alloc the string
+        char row_num_str[10];
+        // copy it over
+        sprintf(row_num_str, "%d", i);
+        strncat(buf, row_num_str, strlen(row_num_str));
+        strncat(buf, " ", strlen(" ") + 1);
+
+        strncat(buf, num_rows_str, strlen(num_rows_str));
+        strncat(buf, " ", strlen(" ") + 1);
+        // printf("buf is: %s\n", buf);
+    }
+    return 0;
+}
+
+int send_rows(char **file_buffer_2d, int *rows_to_send, int num_rows, struct send_rec_args *args)
+{
+    for (int i = 0; i < num_rows; i++)
+    {
+        if (rows_to_send[i])
+        {
+            memset(args->buf, '\0', BUFSIZE);
+            copy_row(file_buffer_2d[i], args->buf);
+            send_to_client(args);
+        }
+    }
+    return 0;
+}
+
+int listen_for_resend(int *rows_to_send, int num_rows, struct send_rec_args *args)
+{
+
+    // recieves "resend" packets from the client until they stop coming
+    // populates an array called rows_to_send with this information
+    int rec_res;
+    while ((rec_res = rec_from_client_tmout(args) != TIMEOUT))
+    {   
+        if (strncmp("ALLREC", args->buf, strlen("ALLREC")) == 0)
+        {
+            return 0;
+        }
+
+        if (strncmp("RESEND ", args->buf, strlen("RESEND ")) == 0)
+        {
+            printf("got resend. buf is: %s\n ",args->buf);
+            char *row_num_str = &args->buf[strlen("RESEND ")];
+            int *row_num = NULL;
+            if (!parseLong(row_num_str, row_num))
+            {
+                fprintf(stderr, "Error parsing row number from listen_for_resend\n");
+                return -1;
+            }
+            if (*row_num >= num_rows)
+            {
+                fprintf(stderr, "Error with row number from listen_for_resend (to large)\n");
+                return -1;
+            }
+            rows_to_send[*row_num] = 1;
+        }
+    }
+    return 1;
 }
 
 int rec_file_from_client(char *filename, struct send_rec_args *args)
@@ -308,7 +482,15 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
     // tell the client to send the size of the file
     send_to_client(args);
     // expect "FILESIZE [filesize]" in return
+    memset(args->buf, '\0', BUFSIZE);
     rec_from_client(args);
+    
+    if (strncmp("FAIL", args->buf, strlen("FAIL")) == 0)
+    {
+        fprintf(stderr, "Client could not send file\n");
+        return -1;
+    }
+    
     if (strncmp("FILESIZE", args->buf, strlen("FILESIZE")) != 0)
     {
         fprintf(stderr, "Did not receive filesize from client\n");
@@ -334,11 +516,12 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
     fill_buffer_from_client(file_buffer_2d, filesize, args, rows_rec);
     // tell client which ones we missed
     int resend_res;
-    while ((resend_res = resend_rows(rows_rec, num_rows, args)) != 0)
+    while ((resend_res = req_resend(rows_rec, num_rows, args)) != 0)
     {
         if (resend_res < 0)
         {
             fprintf(stderr, "Error resending rows \n");
+            free_2d(file_buffer_2d, filesize);
             return -1;
         }
         fill_buffer_from_client(file_buffer_2d, filesize, args, rows_rec);
@@ -346,7 +529,10 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
     memset(args->buf, '\0', BUFSIZE);
     strncpy(args->buf, "ALLREC", strlen("ALLREC"));
     send_to_client(args);
-    bin_to_file_2d("server_rec_file.txt", file_buffer_2d, filesize);
+    bin_to_file_2d(filename, file_buffer_2d, filesize);
+    free_2d(file_buffer_2d, filesize);
+    return 0;
+    
 }
 
 
@@ -363,7 +549,6 @@ int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec
             return -1;
         }
 
-        printf("\n");
         char *str = args->buf;
         int row_num = -1;
         int total_rows = -1;
@@ -390,12 +575,11 @@ int fill_buffer_from_client(char **file_buffer_2d, int filesize, struct send_rec
 }
 
 
-int resend_rows(int *rows_rec, int num_rows, struct send_rec_args *args)
+int req_resend(int *rows_rec, int num_rows, struct send_rec_args *args)
 {
     bool resend_again = 0;
     for (int i = 0; i < num_rows; i++)
     {
-        int send_res;
         if (rows_rec[i] != 1)
         {
             resend_again = 1;
@@ -425,17 +609,22 @@ int copy_row(char *src, char *dest)
         dest[i] = src[i];
         //printf("%c", src[i]);
     }
+    return 0;
+    
 }
 
 int get_row_num(char *buf, int *row_num, int *total_rows)
 {
     char total_rows_str[BUFSIZE];
+    memset(total_rows_str, '\0', BUFSIZE);
     char row_num_str[BUFSIZE];
-    if (split_client_in(buf, row_num_str, total_rows_str) < 0)
+    memset(row_num_str, '\0', BUFSIZE);
+    if (split_cmd(buf, row_num_str, total_rows_str) < 0)
     {
         fprintf(stderr, "In get_row_num: Error splitting client input\n");
         return -1;
     }
+    
     if (!parseLong(row_num_str, row_num))
     {
         fprintf(stderr, "In get_row_num: Error with parseLong\n");
@@ -446,17 +635,22 @@ int get_row_num(char *buf, int *row_num, int *total_rows)
         fprintf(stderr, "In get_row_num: Error with parseLong\n");
         return -1;
     }
+    return 0;
 }
 
 int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
 {
-    FILE *dest_fileptr = fopen(dest_filename, "w");
+    //char client_copy[20] = "client_copy.txt";
+    //FILE *dest_fileptr = fopen(client_copy, "wb");
+    FILE *dest_fileptr = fopen(dest_filename, "wb");
+    
     if (dest_fileptr == NULL)
     {
         fprintf(stderr, "Error opening dest file.\n");
         return -1;
     }
     int rows = get_num_rows(filesize);
+    //printf("rows = %d\n",rows );
 
     int bytes_written = 0;
     int bytes_remaining = filesize;
@@ -468,12 +662,17 @@ int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
         if ((BUFSIZE - 16) > bytes_remaining)
         {
             n_written = fwrite(ptr, sizeof(char), bytes_remaining, dest_fileptr);
+            //printf("final_row:\n    row: %d, bytes_written: %d\n", i+1, bytes_written+n_written);
             break;
         }
         n_written = fwrite(ptr, sizeof(char), BUFSIZE - 16, dest_fileptr);
         bytes_written += n_written;
         bytes_remaining -= n_written;
     }
+    rewind(dest_fileptr);              // Jump back to the beginning of the file
+    
+    return 0;
+    
 }
 
 int free_2d(char **arr, int filesize)
@@ -484,6 +683,8 @@ int free_2d(char **arr, int filesize)
         free(arr[i]);
     }
     free(arr);
+    return 0;
+    
 }
 
 char **calloc_2d(int filesize)
@@ -497,16 +698,16 @@ char **calloc_2d(int filesize)
     return arr;
 }
 
-char **read_file_to_buf(FILE *fileptr)
+int read_file_to_buf(FILE *fileptr, char **file_buffer_2d)
 {
+    // accepts a 2d array and fills it with the files binary data
     int filesize = get_file_size(fileptr);
     char *file_buffer_1d = (char *)calloc(filesize, sizeof(char));
     fread(file_buffer_1d, filesize, 1, fileptr); // Read in the entire file
 
-    char **file_buffer_2d = calloc_2d(filesize);
     int rows = get_num_rows(filesize);
-    printf("NUM ROWS: %d\n", rows);
-    printf("FILESIZE %d\n", filesize);
+    // printf("NUM ROWS: %d\n", rows);
+    // printf("FILESIZE %d\n", filesize);
 
     int ind_1d = 0;
     for (int i = 0; i < rows; i++)
@@ -524,7 +725,7 @@ char **read_file_to_buf(FILE *fileptr)
         }
     }
     free(file_buffer_1d);
-    return file_buffer_2d;
+    return 0;
 }
 
 int get_file_size(FILE *fileptr)
@@ -539,7 +740,9 @@ int parse_rec_filesize(struct send_rec_args *args)
 {
     char filesize_str[BUFSIZE];
     char msg_from_client[10];
-    split_client_in(args->buf, msg_from_client, filesize_str);
+    memset(filesize_str, '\0', BUFSIZE);    
+    
+    split_cmd(args->buf, msg_from_client, filesize_str);
     int filesize;
     bool scs = parseLong(filesize_str, &filesize);
     if (!scs)
@@ -547,7 +750,7 @@ int parse_rec_filesize(struct send_rec_args *args)
         fprintf(stderr, "parseLong says it messed this up\n");
         return -1;
     }
-    if (filesize == 0 || filesize == LONG_MAX || filesize == LONG_MIN)
+    if (filesize == 0)
     {
         return -1;
     }
@@ -555,15 +758,14 @@ int parse_rec_filesize(struct send_rec_args *args)
     return filesize;
 }
 
-bool parseLong(const char *str, long *val)
+bool parseLong(const char *str, int *val)
 {
     char *temp;
     bool rc = true;
     errno = 0;
-    *val = strtol(str, &temp, 0);
+    *val = (int)strtol(str, &temp, 0);
 
-    if (temp == str ||
-        ((*val == LONG_MIN || *val == LONG_MAX) && errno == ERANGE))
+    if (temp == str ||errno == ERANGE) 
         rc = false;
 
     return rc;
@@ -573,8 +775,6 @@ int get_num_rows(int filesize)
 {
 
     int row_len = BUFSIZE - 16;
-    int filesize_db = filesize;
-
     int ceil = (filesize + row_len - 1) / row_len;
 
     return ceil;
@@ -593,17 +793,17 @@ void str_to_lower(char *buf)
     }
 }
 
-
-int split_client_in(char *buf, char *cmd, char *filename)
+int split_cmd(char *buf, char *str1, char *str2)
 { /*
-   * split input by white space into two strings
-   *
-   * if no filename is passed, cmd is set equal to buf
+   * split the usr command into str1 - str2 by whitespace
+   * if no space is found, str1 is set equal to the first string in buf,
+   * str2 is set to all null chars, and 0 is returned
+   * otherwise str2 is set to the second string, and 1 is returned 
    */
 
-    // printf("client in is: %s\n", buf);
+    // printf("usr in is: %s\n", buf);
     int split_index = -1;
-    for (int i = 0; i < strlen(buf); i++)
+    for (int i = 0; i < (int)strlen(buf); i++)
     {
         if (buf[i] == ' ')
         {
@@ -613,22 +813,28 @@ int split_client_in(char *buf, char *cmd, char *filename)
     }
     if (split_index == -1)
     { // no whitespace was found
-        strncpy(cmd, buf, strlen(buf));
+        strncpy(str1, buf, strlen(buf));
+        memset(str2, '\0', BUFSIZE);
         return 0;
     }
-    strncpy(cmd, buf, split_index);
-    cmd[split_index] = '\0';
-    //printf("str1 is: %s\n", cmd);
+    strncpy(str1, buf, split_index);
+    str1[split_index] = '\0';
+    //printf("Cmd is: %s\n", str1);
 
     int filename_ind = 0;
-    for (int i = split_index + 1; i < strlen(buf); i++)
+    for (int i = split_index + 1; i < (int)strlen(buf); i++)
     {
-        filename[filename_ind] = buf[i];
+        if(buf[i] == '\0' || buf[i] == ' ')
+        {
+            break;
+        }
+        str2[filename_ind] = buf[i];
         filename_ind++;
-    }    
-    //printf("str1: %s, str2: %s\n", cmd, filename);
+    }
+    printf("Filename is: %s\n", str2);
     return 1;
 }
+
 
 int validate_client_no_file(char *cmd)
 { // No filename was passed - validate that cmd is either ls or exit
@@ -646,7 +852,7 @@ int validate_client_no_file(char *cmd)
     return res;
 }
 
-int validate_client_file_op(char *cmd, char *filename)
+int validate_client_file_op(char *cmd)
 { // Filename was passed - validate that cmd is either get, put, or delete
 
     int res = -1;
@@ -668,3 +874,40 @@ int validate_client_file_op(char *cmd, char *filename)
     }
     return res;
 }
+
+int handle_client_cmd(struct send_rec_args *args)
+{ // process the clients command
+    strip_newline(args->buf);
+    str_to_lower(args->buf);
+
+    char *cmd = calloc(strlen(args->buf), sizeof(char));
+    char *filename = calloc(strlen(args->buf), sizeof(char));
+    int rec_filename = 0;
+    if ((rec_filename = split_cmd(args->buf, cmd, filename)) < 0)
+    { // error with split_cmd
+        return -1;
+    }
+    printf("in handle_client_cmd: filename is: %s\n", filename);
+    
+    
+    // validate the clients commands
+    int res = -1;
+    if (rec_filename)
+    {
+        if ((res = validate_client_file_op(cmd)) < 0)
+        {
+            fprintf(stderr, "Error with validate_client_file_op\n");
+            return -1;
+        }
+    }
+    else
+    {
+        if ((res = validate_client_no_file(cmd)) < 0)
+        {
+            fprintf(stderr, "Error with validate_client_no_file\n");
+            return -1;
+        }
+    }
+    return (cmd_switch(res, filename, args));
+}
+
