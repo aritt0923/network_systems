@@ -32,7 +32,6 @@ int rec_from_server_tmout(struct send_rec_args *args);
 int send_to_server(struct send_rec_args *args);
 int send_str(char *str, struct send_rec_args *args);
 
-
 // switch functions
 int send_file_to_server(char *filename, struct send_rec_args *args);
 int rec_file_from_server(char *filename, struct send_rec_args *args);
@@ -143,6 +142,7 @@ int main(int argc, char **argv)
 
         handle_usr_cmd(&args);
     }
+    free(buf);
 
     return 0;
 }
@@ -150,7 +150,7 @@ int main(int argc, char **argv)
 int rec_from_server(struct send_rec_args *args)
 {
     struct timeval tv;
-    tv.tv_sec = 0;
+    tv.tv_sec = 1;
     tv.tv_usec = 0;
     if (setsockopt(args->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
     {
@@ -160,7 +160,10 @@ int rec_from_server(struct send_rec_args *args)
     memset(args->buf, '\0', strlen(args->buf));
     args->n = recvfrom(args->sockfd, args->buf, BUFSIZE, 0, (struct sockaddr *)args->serveraddr, (socklen_t *)args->serverlen);
     if (args->n < 0)
-        error("ERROR in recvfrom");
+    {
+        //fprintf(stderr, "Error in recvfrom\n");
+        return -1;
+    }
     // printf("Echo from server: %s", args->buf);
     return 0;
 }
@@ -205,16 +208,14 @@ int send_to_server(struct send_rec_args *args)
 
 int send_str(char *str, struct send_rec_args *args)
 {
-    if(strlen(str) >= BUFSIZE-1)
+    if (strlen(str) >= BUFSIZE - 1)
     {
         return -1;
     }
     memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, str, strlen(str)+1);
+    strncpy(args->buf, str, strlen(str) + 1);
     send_to_server(args);
 }
-
-
 
 int cmd_switch(int res, char *filename, struct send_rec_args *args)
 {
@@ -251,16 +252,30 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
 
 int send_delete(char *filename, struct send_rec_args *args)
 {
-    
 }
 
 int send_ls(struct send_rec_args *args)
 {
-    
 }
 
 int send_exit(struct send_rec_args *args)
 {
+    send_str("EXIT", args);
+    if (rec_from_server(args) < 0)
+    {
+        fprintf(stderr, "Server did not say goodbye :(\n");
+        exit(1);
+    }
+    if (strncmp("GOODBYE", args->buf, strlen("GOODBYE")) == 0)
+    {
+        printf("Server said goodbye - exiting!\n");
+        free(args->buf);
+        exit(0);
+    }
+    fprintf(stderr, "Server did not say goodbye :(\n");
+    exit(1);
+    
+    
     
 }
 
@@ -276,13 +291,13 @@ int rec_file_from_server(char *filename, struct send_rec_args *args)
     // expect "FILESIZE [filesize]" in return
     memset(args->buf, '\0', BUFSIZE);
     rec_from_server(args);
-    
+
     if (strncmp("FAIL", args->buf, strlen("FAIL")) == 0)
     {
-        fprintf(stderr, "Server could not send file\n");
+        fprintf(stderr, "Server could not send file. Operation failed.\n");
         return -1;
     }
-    
+
     if (strncmp("FILESIZE", args->buf, strlen("FILESIZE")) != 0)
     {
         fprintf(stderr, "Did not receive filesize from server\n");
@@ -297,7 +312,6 @@ int rec_file_from_server(char *filename, struct send_rec_args *args)
 
     // recieved filesize
     char **file_buffer_2d = calloc_2d(filesize);
-
 
     int num_rows = get_num_rows(filesize);
     int rows_rec[num_rows];
@@ -327,10 +341,10 @@ int rec_file_from_server(char *filename, struct send_rec_args *args)
             return -1;
         }
     }
-
     send_str("ALLREC", args);
     bin_to_file_2d(filename, file_buffer_2d, filesize);
     free_2d(file_buffer_2d, filesize);
+    printf("File %s successfully transfered from server to host\n", filename);
     return 0;
 }
 
@@ -566,7 +580,7 @@ int send_file_size(FILE *fileptr, struct send_rec_args *args)
     // copy it over
     sprintf(filesize_buf, "%d", filesize);
     strncat(args->buf, filesize_buf, strlen(filesize_buf));
-    strncat(args->buf, " ", strlen(" ")+1);
+    strncat(args->buf, " ", strlen(" ") + 1);
     send_to_server(args);
     memset(filesize_buf, '\0', strlen(filesize_buf));
     free(filesize_buf);
@@ -738,7 +752,7 @@ int split_cmd(char *buf, char *str1, char *str2)
     int filename_ind = 0;
     for (int i = split_index + 1; i < (int)strlen(buf); i++)
     {
-        if(buf[i] == '\0' || buf[i] == ' ')
+        if (buf[i] == '\0' || buf[i] == ' ')
         {
             break;
         }
@@ -754,8 +768,10 @@ int handle_usr_cmd(struct send_rec_args *args)
     strip_newline(args->buf);
     str_to_lower(args->buf);
 
-    char *cmd = calloc(strlen(args->buf), sizeof(char));
-    char *filename = calloc(strlen(args->buf), sizeof(char));
+    char cmd[BUFSIZE];
+    memset(cmd, '\0', BUFSIZE);
+    char filename[BUFSIZE];
+    memset(filename, '\0', BUFSIZE);
     int rec_filename = 0;
     if ((rec_filename = split_cmd(args->buf, cmd, filename)) < 0)
     { // error with split_cmd
@@ -779,11 +795,12 @@ int handle_usr_cmd(struct send_rec_args *args)
             return -1;
         }
     }
-    return (cmd_switch(res, filename, args));
+    return cmd_switch(res, filename, args);
 }
 
 int validate_usr_no_file(char *cmd)
 { // No filename was passed - validate that cmd is either ls or exit
+    printf("cmd is %s\n", cmd);
     int res = -1;
     if (strcmp("ls", cmd) == 0)
     {
