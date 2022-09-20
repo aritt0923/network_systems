@@ -30,10 +30,8 @@ struct send_rec_args
 int rec_from_server(struct send_rec_args *args);
 int rec_from_server_tmout(struct send_rec_args *args);
 int send_to_server(struct send_rec_args *args);
+int send_str(char *str, struct send_rec_args *args);
 
-// send status
-int send_fail(struct send_rec_args *args);
-int send_success(struct send_rec_args *args);
 
 // switch functions
 int send_file_to_server(char *filename, struct send_rec_args *args);
@@ -205,19 +203,18 @@ int send_to_server(struct send_rec_args *args)
     return *args->serverlen;
 }
 
-int send_fail(struct send_rec_args *args)
+int send_str(char *str, struct send_rec_args *args)
 {
+    if(strlen(str) >= BUFSIZE-1)
+    {
+        return -1;
+    }
     memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "FAIL", strlen("FAIL"));
+    strncpy(args->buf, str, strlen(str)+1);
     send_to_server(args);
 }
 
-int send_success(struct send_rec_args *args)
-{
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SUCCESS", strlen("SUCCESS"));
-    send_to_server(args);
-}
+
 
 int cmd_switch(int res, char *filename, struct send_rec_args *args)
 {
@@ -254,14 +251,17 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
 
 int send_delete(char *filename, struct send_rec_args *args)
 {
+    
 }
 
 int send_ls(struct send_rec_args *args)
 {
+    
 }
 
 int send_exit(struct send_rec_args *args)
 {
+    
 }
 
 int rec_file_from_server(char *filename, struct send_rec_args *args)
@@ -304,9 +304,7 @@ int rec_file_from_server(char *filename, struct send_rec_args *args)
     memset(rows_rec, 0, num_rows * sizeof(int));
 
     // tell the server to send the file
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SENDFILE", strlen("SENDFILE"));
-    send_to_server(args);
+    send_str("SENDFILE", args);
     // start recieving packets
     if (fill_buffer_from_server(file_buffer_2d, filesize, args, rows_rec) < 0)
     {
@@ -330,10 +328,7 @@ int rec_file_from_server(char *filename, struct send_rec_args *args)
         }
     }
 
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "ALLREC", strlen("ALLREC")+1);
-    printf("SENDING ALLREC\n");
-    send_to_server(args);
+    send_str("ALLREC", args);
     bin_to_file_2d(filename, file_buffer_2d, filesize);
     free_2d(file_buffer_2d, filesize);
     return 0;
@@ -442,7 +437,7 @@ int send_file_to_server(char *filename, struct send_rec_args *args)
     }
     else
     {
-        fprintf(stderr, "Error with ack from server: expected SENDFILESIZE\n");
+        fprintf(stderr, "Error with ack from server: expected SENDSIZE\n");
         free_2d(file_buffer_2d, filesize);
 
         return -1;

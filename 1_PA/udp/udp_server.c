@@ -36,10 +36,6 @@ int send_to_client(struct send_rec_args *args);
 int rec_from_client(struct send_rec_args *args);
 int rec_from_client_tmout(struct send_rec_args *args);
 
-// send status
-int send_fail(struct send_rec_args *args);
-int send_success(struct send_rec_args *args);
-
 //switch functions
 int rec_file_from_client(char *filename, struct send_rec_args *args);
 int send_file_to_client(char *filename, struct send_rec_args *args);
@@ -171,13 +167,6 @@ int main(int argc, char **argv)
          */
         memset(args.buf, '\0', BUFSIZE);
         rec_from_client(&args);
-        /*
-        bzero(buf, BUFSIZE);
-        n = recvfrom(sockfd, buf, BUFSIZE, 0,
-                     (struct sockaddr *)&clientaddr, &clientlen);
-        if (n < 0)
-            error("ERROR in recvfrom");
-        */
 
         /*
          * gethostbyaddr: determine who sent the datagram
@@ -257,19 +246,17 @@ int send_to_client(struct send_rec_args *args)
     return *args->clientlen;
 }
 
-int send_fail(struct send_rec_args *args)
+int send_str(char *str, struct send_rec_args *args)
 {
+    if(strlen(str) >= BUFSIZE-1)
+    {
+        return -1;
+    }
     memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "FAIL", strlen("FAIL"));
+    strncpy(args->buf, str, strlen(str)+1);
     send_to_client(args);
 }
 
-int send_success(struct send_rec_args *args)
-{
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SUCCESS", strlen("SUCCESS"));
-    send_to_client(args);
-}
 
 int cmd_switch(int res, char *filename, struct send_rec_args *args)
 {
@@ -326,7 +313,7 @@ int send_file_to_client(char *filename, struct send_rec_args *args)
     if (fileptr == NULL)
     {
         fprintf(stderr, "Error opening file: %s\n", filename);
-        send_fail(args);
+        send_str("FAIL", args);
         return 1;
     }
     int filesize = get_file_size(fileptr);
@@ -477,12 +464,8 @@ int listen_for_resend(int *rows_to_send, int num_rows, struct send_rec_args *arg
 
 int rec_file_from_client(char *filename, struct send_rec_args *args)
 {
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SENDSIZE", strlen("SENDSIZE"));
-    // tell the client to send the size of the file
-    send_to_client(args);
+    send_str("SENDSIZE", args);
     // expect "FILESIZE [filesize]" in return
-    memset(args->buf, '\0', BUFSIZE);
     rec_from_client(args);
     
     if (strncmp("FAIL", args->buf, strlen("FAIL")) == 0)
@@ -503,15 +486,14 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
         return -1;
     }
     char **file_buffer_2d = calloc_2d(filesize);
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "SENDFILE", strlen("SENDFILE"));
+
 
     int num_rows = get_num_rows(filesize);
     int rows_rec[num_rows];
     memset(rows_rec, 0, num_rows * sizeof(int));
 
     // tell the client to send the file
-    send_to_client(args);
+    send_str("SENDFILE", args);
     // start recieving packets
     fill_buffer_from_client(file_buffer_2d, filesize, args, rows_rec);
     // tell client which ones we missed
@@ -526,9 +508,7 @@ int rec_file_from_client(char *filename, struct send_rec_args *args)
         }
         fill_buffer_from_client(file_buffer_2d, filesize, args, rows_rec);
     }
-    memset(args->buf, '\0', BUFSIZE);
-    strncpy(args->buf, "ALLREC", strlen("ALLREC"));
-    send_to_client(args);
+    send_str("ALLREC", args);
     bin_to_file_2d(filename, file_buffer_2d, filesize);
     free_2d(file_buffer_2d, filesize);
     return 0;
