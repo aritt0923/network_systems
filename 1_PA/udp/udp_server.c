@@ -290,10 +290,23 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
 
 int delete_file(char *filename, struct send_rec_args *args)
 {
+    if (remove(filename) == 0)
+    {
+        send_str("SUCCESS", args);
+        return 0;
+    }
+
+    else
+    {
+        send_str("FAIL", args);
+        return -1;
+    }
 }
 
 int ls(struct send_rec_args *args)
 {
+    // I got this (roughly) from a stack overflow page
+    // I'll provide the link when possible, but the website is down for maintence
     memset(args->buf, '\0', BUFSIZE);
     DIR *d;
     struct dirent *dir;
@@ -304,7 +317,6 @@ int ls(struct send_rec_args *args)
         {
             strncat(args->buf, dir->d_name, strlen(dir->d_name));
             strncat(args->buf, "\n", 1);
-            
         }
         closedir(d);
     }
@@ -739,6 +751,8 @@ int parse_rec_filesize(struct send_rec_args *args)
 
 bool parseLong(const char *str, int *val)
 {
+    // I got this (roughly) from a stack overflow page
+    // I'll provide the link when possible, but the website is down for maintence
     char *temp;
     bool rc = true;
     errno = 0;

@@ -253,6 +253,19 @@ int cmd_switch(int res, char *filename, struct send_rec_args *args)
 
 int send_delete(char *filename, struct send_rec_args *args)
 {
+    memset(args->buf, '\0', BUFSIZE);
+    strncpy(args->buf, "DELETE ", strlen("DELETE "));
+    strncat(args->buf, filename, strlen(filename));
+    send_to_server(args);
+    
+    rec_from_server(args);
+    if (strncmp("SUCCESS", args->buf, strlen("SUCCESS")) == 0)
+    {
+        printf("File %s successfully deleted\n", filename);
+        return 0;
+    }
+    fprintf(stderr, "Server did not successfully delete file %s\n", filename);
+    return -1;
 }
 
 int send_ls(struct send_rec_args *args)
