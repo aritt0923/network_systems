@@ -71,6 +71,7 @@ int get_num_rows(int filesize);
 bool parseLong(const char *str, int *val);
 
 #define BUFSIZE 2048
+#define MAX_CMD_LEN 25
 #define GET 1
 #define PUT 2
 #define DELETE 3
@@ -257,6 +258,9 @@ int send_delete(char *filename, struct send_rec_args *args)
 int send_ls(struct send_rec_args *args)
 {
     send_str("LS",args);
+    rec_from_server(args);
+    printf("Listing files in servers current working directory:\n");
+    printf("%s", args->buf);
 }
 
 int send_exit(struct send_rec_args *args)
@@ -282,6 +286,7 @@ int send_exit(struct send_rec_args *args)
 
 int rec_file_from_server(char *filename, struct send_rec_args *args)
 {
+    printf("in get file from server\n");
     // zero the buffer and ensure that we're sending the message we want
     memset(args->buf, '\0', BUFSIZE);
     strncpy(args->buf, "get ", strlen("get "));
@@ -664,6 +669,7 @@ int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
         return -1;
     }
     int rows = get_num_rows(filesize);
+    printf("rows = %d\n", rows);
 
     int bytes_written = 0;
     int bytes_remaining = filesize;
@@ -676,6 +682,7 @@ int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
         if ((BUFSIZE - 16) > bytes_remaining)
         {
             n_written = fwrite(ptr, sizeof(char), bytes_remaining, dest_fileptr);
+            printf("final_row:\n    row: %d, bytes_written: %d\n", i + 1, bytes_written + n_written);
             break;
         }
         n_written = fwrite(ptr, sizeof(char), BUFSIZE - 16, dest_fileptr);
@@ -684,7 +691,6 @@ int bin_to_file_2d(char *dest_filename, char **file_buffer_2d, int filesize)
     }
     rewind(dest_fileptr); // Jump back to the beginning of the file
     fclose(dest_fileptr);
-
     return 0;
 }
 /*
@@ -743,7 +749,7 @@ int split_cmd(char *buf, char *str1, char *str2)
     if (split_index == -1)
     { // no whitespace was found
         strncpy(str1, buf, strlen(buf));
-        memset(str2, '\0', BUFSIZE);
+        memset(str2, '\0', MAX_CMD_LEN);
         return 0;
     }
     strncpy(str1, buf, split_index);
@@ -768,16 +774,16 @@ int handle_usr_cmd(struct send_rec_args *args)
 { // process the user's command
     strip_newline(args->buf);
     str_to_lower(args->buf);
-    if(strlen(args->buf) > 25)
+    if (strlen(args->buf) > MAX_CMD_LEN)
     {
-        fprintf(stderr, "cmd too long\n");
+        fprintf(stderr, "invalid cmd\n");
         return -1;
     }
 
-    char cmd[50];
-    memset(cmd, '\0', 50);
-    char filename[50];
-    memset(filename, '\0', 50);
+    char cmd[MAX_CMD_LEN];
+    memset(cmd, '\0', MAX_CMD_LEN);
+    char filename[MAX_CMD_LEN];
+    memset(filename, '\0', MAX_CMD_LEN);
     int rec_filename = 0;
     if ((rec_filename = split_cmd(args->buf, cmd, filename)) < 0)
     { // error with split_cmd
@@ -872,6 +878,7 @@ int parse_rec_filesize(struct send_rec_args *args)
     memset(filesize_str, '\0', BUFSIZE);
     char msg_from_server[10];
     split_cmd(args->buf, msg_from_server, filesize_str);
+    printf("in parse_rec_filesize: filesize_str is %s\n", filesize_str);
     int filesize = 0;
     bool scs = parseLong(filesize_str, &filesize);
     if (!scs)
@@ -883,6 +890,7 @@ int parse_rec_filesize(struct send_rec_args *args)
     {
         return -1;
     }
+    printf("filesize is: %d\n", filesize);
     return filesize;
 }
 

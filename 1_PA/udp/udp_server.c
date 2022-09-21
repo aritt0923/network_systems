@@ -72,6 +72,7 @@ int get_num_rows(int filesize);
 bool parseLong(const char *str, int *val);
 
 #define BUFSIZE 2048
+#define MAX_CMD_LEN 25
 #define GET 1
 #define PUT 2
 #define DELETE 3
@@ -293,6 +294,21 @@ int delete_file(char *filename, struct send_rec_args *args)
 
 int ls(struct send_rec_args *args)
 {
+    memset(args->buf, '\0', BUFSIZE);
+    DIR *d;
+    struct dirent *dir;
+    d = opendir(".");
+    if (d)
+    {
+        while ((dir = readdir(d)) != NULL)
+        {
+            strncat(args->buf, dir->d_name, strlen(dir->d_name));
+            strncat(args->buf, "\n", 1);
+            
+        }
+        closedir(d);
+    }
+    send_to_client(args);
 }
 
 int client_exit(struct send_rec_args *args)
@@ -777,7 +793,7 @@ int split_cmd(char *buf, char *str1, char *str2)
     if (split_index == -1)
     { // no whitespace was found
         strncpy(str1, buf, strlen(buf));
-        memset(str2, '\0', BUFSIZE);
+        memset(str2, '\0', MAX_CMD_LEN);
         return 0;
     }
     strncpy(str1, buf, split_index);
@@ -840,16 +856,16 @@ int handle_client_cmd(struct send_rec_args *args)
 { // process the clients command
     strip_newline(args->buf);
     str_to_lower(args->buf);
-    if(strlen(args->buf) > 25)
+    if (strlen(args->buf) > MAX_CMD_LEN)
     {
         fprintf(stderr, "cmd too long\n");
         return -1;
     }
 
-    char cmd[50];
-    memset(cmd, '\0', 50);
-    char filename[50];
-    memset(filename, '\0', 50);
+    char cmd[MAX_CMD_LEN];
+    memset(cmd, '\0', MAX_CMD_LEN);
+    char filename[MAX_CMD_LEN];
+    memset(filename, '\0', MAX_CMD_LEN);
     int rec_filename = 0;
     if ((rec_filename = split_cmd(args->buf, cmd, filename)) < 0)
     { // error with split_cmd
@@ -875,5 +891,4 @@ int handle_client_cmd(struct send_rec_args *args)
         }
     }
     return cmd_switch(res, filename, args);
-    
 }
