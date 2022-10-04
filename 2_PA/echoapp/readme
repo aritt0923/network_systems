@@ -1,0 +1,57 @@
+
+Echo Client-Server in C:
+
+These are a few simple examples meant to refresh your knowledge of client and server 
+communication over TCP sockets.
+
+1. Dowload echoapp.tar and extract the files into a Unix directory. 
+You should see the following files:
+
+echoserver.c	C code for a sequential echo server
+echoservert.c	C code for a multi-threaded echo server
+echoclient.c	C code for an echo client
+nethelp.c	File containing helper functions
+nethelp.h	Header file for functions defined in nethelp.c
+Makefile	Compiles and links together nethelp.c and a source file 
+readme		This file
+
+2. Build the echoserver, echoservert and echoclient executables by typing in 'make' (without quotes) 
+at the shell prompt.
+
+3. Test the client and sequential server on tanner (or on your local computer). Pick a 5-digit 
+integer number N no greater than 64000 and pass it as an argument to the server:
+
+     ./echoserver N
+
+3a. Using telnet: Open a separate window on tanner (or localhost) to test the server with telnet first:
+
+     telnet localhost  N
+
+The telnet program will open a connection to port N on localhost. Now everything you type in will be 
+send to the server (listening at port N) and echoed back to you by the server.
+
+3b. Using the echo client: Open a separate window on tanner (or on localhost) and invoke the echo client 
+by passing it the name of the machine and the port for the echo server: 
+
+     ./echoclient localhost N
+
+Now anything you type into the client window will be sent over the connection and echoed 
+back to you by the server.
+
+4. Try to understand what each step of the client and server code does.  
+Report questions and answers you may generate while experimenting with this code. 
+
+5. The multithreaded version echoservert.c spawns a thread for each connection from a client, 
+then gets back immediately to listening for new incoming requests from clients. To test your 
+multithreaded server, open two client windows and have the clients talk simultaneously to the server.
+
+
+
+
+
+
+
+
+
+
+
