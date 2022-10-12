@@ -47,8 +47,7 @@ int main(int argc , char *argv[])
 	puts("Waiting for incoming connections...");
 	c = sizeof(struct sockaddr_in);
 	
-	
-	//Accept and incoming connection
+	//Accept an incoming connection
 	puts("Waiting for incoming connections...");
 	c = sizeof(struct sockaddr_in);
 	while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
@@ -113,6 +112,7 @@ void *connection_handler(void *socket_desc)
 		perror("recv failed");
 	}
 		
+    close(sock);
 	//Free the socket pointer
 	free(socket_desc);
 	
