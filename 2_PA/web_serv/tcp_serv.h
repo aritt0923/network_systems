@@ -7,9 +7,12 @@
 #include <arpa/inet.h> //inet_addr
 #include <unistd.h>    //write
 #include <stdlib.h>
+#include <errno.h>
+
 #include <wrappers.h>
 #include <utilities.h>
 #include <status_codes.h>
+
 
 #define KILO 1024
 #define MAX_CLNT_MSG_SZ 2000
@@ -37,7 +40,7 @@ int get_filetype(char * filename, char* filetype_buf);
 /*
  * builds header for server response
  */
-int build_header(char * filename, char * filetype, char* header, int http_v);
+int build_header(char * filetype, char* header_buf, int http_v, int filesize);
 
 /*
  * Sends file pointed to by FP to client

@@ -16,3 +16,12 @@ int str_to_lower(char * str, int len)
     free(tmp_str);
     
 }
+
+
+int get_file_size(FILE *fileptr)
+{
+    fseek(fileptr, 0, SEEK_END);  // Jump to the end of the file
+    int filelen = ftell(fileptr); // Get the current byte offset in the file
+    rewind(fileptr);              // Jump back to the beginning of the file
+    return filelen;
+}
