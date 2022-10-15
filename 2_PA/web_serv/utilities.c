@@ -14,6 +14,7 @@ int str_to_lower(char * str, int len)
     strncpy(str, tmp_str, len);
     
     free(tmp_str);
+    return 0;
     
 }
 

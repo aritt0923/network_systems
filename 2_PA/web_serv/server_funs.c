@@ -8,9 +8,10 @@
 int handle_get(const char *client_req, int sockfd)
 {
     // printf("in handle get\n");
-    char *filepath_buf = calloc(KILO, sizeof(char));
-    char *filetype_buf = calloc(25, sizeof(char));
-    char *header_buf = calloc(KILO, sizeof(char));
+    char *filepath_buf = calloc_wrap(KILO, sizeof(char));
+    char *filetype_buf = calloc_wrap(25, sizeof(char));
+    char *header_buf = calloc_wrap(KILO, sizeof(char));
+    char *true_filepath = calloc_wrap(KILO, sizeof(char));
 
     int http_v = 0;
 
@@ -18,34 +19,34 @@ int handle_get(const char *client_req, int sockfd)
     if ((res = parse_req(client_req, filepath_buf,
                          filetype_buf, &http_v)) != 0)
     { // exit point for any errors returned by parse_req
-        send_error(res, http_v, sockfd);
-        fprintf("parse_req returned %d\n", res);
+        send_error(header_buf, res, http_v, sockfd);
         return res;
     }
-    char *true_filepath = calloc(KILO, sizeof(char));
-    strncpy(true_filepath, "../www/", strlen("../www/"));
-    int idx = strlen(true_filepath);
-    strncpy(&true_filepath[idx], filepath_buf, strlen(filepath_buf));
-    free(filepath_buf);
+    memcpy(true_filepath, "../www/", strlen("../www/"));
+    memcpy(&true_filepath[strlen(true_filepath)], filepath_buf, strlen(filepath_buf));
     
     // printf("Searching for file\n");
     FILE *fp = fopen(true_filepath, "rb");
     if (fp == NULL)
     {
         // perror("[-]Error in reading file.");
-        send_error(NOTFOUND, http_v, sockfd);
+        send_error(header_buf, NOTFOUND, http_v, sockfd);
         fprintf(stderr, "NOTFOUND in handle_get\n");
         return NOTFOUND;
     }
 
     int filesize = get_file_size(fp);
 
-    int hdr_size = build_header(filetype_buf, header_buf, http_v, filesize);
+    build_header(filetype_buf, header_buf, http_v, filesize);
 
     send_response(fp, header_buf, sockfd);
 
+    free(filepath_buf);
     free(filetype_buf);
     free(header_buf);
+    free(true_filepath);
+    
+    return 0;
 }
 
 /*
@@ -116,15 +117,17 @@ int parse_req(const char *client_req, char *filepath_buf,
  * Grabs the filetype from the filepath
  * Fills out filetype_buf accordingly
  * Catches:
- *      400: Bad Request
+ *      405: Bad Request
+ *      404: Not Found
  */
 int get_filetype(char *filepath, char *filetype_buf)
 {
     // printf("in get_filetype\n");
     
-    char *file_ext_buf = calloc(10, sizeof(char));
+    char *file_ext_buf = calloc_wrap(10, sizeof(char));
     int ext_start_idx = -1;
-    for (int i = 0; i < strlen(filepath); i++)
+    int filepath_len = strlen(filepath);
+    for (int i = 0; i < filepath_len; i++)
     {
         if (filepath[i] == '.')
         {
@@ -134,7 +137,7 @@ int get_filetype(char *filepath, char *filetype_buf)
 
     if (ext_start_idx == -1)
     { // no file extension found
-        fprintf(stderr, "BAD REQ 1 in get_filetype\n");
+        fprintf(stderr, "BAD REQ in get_filetype\n");
         return BAD_REQ;
     }
 
@@ -142,41 +145,41 @@ int get_filetype(char *filepath, char *filetype_buf)
     file_ext_buf[4] = '\0';
     if (strncmp(file_ext_buf, "html", 4) == 0)
     {
-        strncpy(filetype_buf, "text/html", strlen("text/html") + 1);
+        memcpy(filetype_buf, "text/html", strlen("text/html"));
         return 0;
     }
     if (strncmp(file_ext_buf, "txt", 3) == 0)
     {
-        strncpy(filetype_buf, "text/plain", strlen("text/plain") + 1);
+        memcpy(filetype_buf, "text/plain", strlen("text/plain"));
         return 0;
     }
     if (strncmp(file_ext_buf, "png", 3) == 0)
     {
-        strncpy(filetype_buf, "image/png", strlen("image/png") + 1);
+        memcpy(filetype_buf, "image/png", strlen("image/png"));
         return 0;
     }
     if (strncmp(file_ext_buf, "gif", 3)== 0)
     {
-        strncpy(filetype_buf, "image/gif", strlen("image/gif") + 1);
+        memcpy(filetype_buf, "image/gif", strlen("image/gif"));
         return 0;
     }
     if (strncmp(file_ext_buf, "jpg", 3) == 0)
     {
-        strncpy(filetype_buf, "image/jpg", strlen("image/jpg") + 1);
+        memcpy(filetype_buf, "image/jpg", strlen("image/jpg"));
         return 0;
     }
     if (strncmp(file_ext_buf, "css", 3) == 0)
     {
-        strncpy(filetype_buf, "text/css", strlen("text/css") + 1);
+        memcpy(filetype_buf, "text/css", strlen("text/css"));
         return 0;
     }
     if (strncmp(file_ext_buf, "js", 2) == 0)
     {
-        strncpy(filetype_buf, "application/javascript", strlen("application/javascript") + 1);
+        memcpy(filetype_buf, "application/javascript", strlen("application/javascript"));
         return 0;
     }
-    fprintf(stderr, "BAD REQ 2 in get_filetype\n");
-    return BAD_REQ;
+    fprintf(stderr, "NOTFOUND in get_filetype\n");
+    return NOTFOUND;
 }
 
 int build_header(char *filetype, char *header_buf, int http_v, int filesize)
@@ -186,42 +189,42 @@ int build_header(char *filetype, char *header_buf, int http_v, int filesize)
     char http_str[10];
     if (http_v == 1)
     {
-        strncpy(http_str, "HTTP/1.1 ", strlen("HTTP/1.1 "));
+        memcpy(http_str, "HTTP/1.1 ", strlen("HTTP/1.1 "));
     }
     else
     {
-        strncpy(http_str, "HTTP/1.0 ", strlen("HTTP/1.0 "));
+        memcpy(http_str, "HTTP/1.0 ", strlen("HTTP/1.0 "));
     }
 
-    strncpy(header_buf, http_str, strlen("HTTP/1._ "));
+    memcpy(header_buf, http_str, strlen("HTTP/1._ "));
 
     int curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], "200 OK\r\n", strlen("200 OK\r\n"));
+    memcpy(&header_buf[curr_idx], "200 OK\r\n", strlen("200 OK\r\n"));
 
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], "Content-Type: ", strlen("Content-Type: "));
+    memcpy(&header_buf[curr_idx], "Content-Type: ", strlen("Content-Type: "));
 
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], filetype, strlen(filetype));
+    memcpy(&header_buf[curr_idx], filetype, strlen(filetype));
 
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], "\r\n", strlen("\r\n"));
+    memcpy(&header_buf[curr_idx], "\r\n", strlen("\r\n"));
 
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], "Content-Length: ", strlen("Content-Length: "));
+    memcpy(&header_buf[curr_idx], "Content-Length: ", strlen("Content-Length: "));
 
     int fs_str_len = snprintf(NULL, 0, "%d", filesize);
     char *fs_str = malloc(fs_str_len + 1);
     snprintf(fs_str, fs_str_len + 1, "%d", filesize);
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], fs_str, fs_str_len);
+    memcpy(&header_buf[curr_idx], fs_str, fs_str_len);
     free(fs_str);
     
     curr_idx = strlen(header_buf);
-    strncpy(&header_buf[curr_idx], "\r\n\r\n", strlen("\r\n\r\n"));
+    memcpy(&header_buf[curr_idx], "\r\n\r\n", strlen("\r\n\r\n"));
     
     printf("%s", header_buf);
-    
+    return 0;
 }
 
 /*
@@ -235,27 +238,78 @@ int send_response(FILE *fp, char *header, int sockfd)
     
     char data[KILO] = {0};
 
-    if (send(sockfd, header, strlen(header), 0) == -1)
-    {
-        perror("[-]Error in sending header.");
-        exit(1);
-    }
+    send_wrap(sockfd, header, strlen(header), 0);
 
     while (fread(data, sizeof(char), KILO, fp) != 0)
     {
-        if (send(sockfd, data, sizeof(data), 0) == -1)
-        {
-            perror("[-]Error in sending file.");
-            exit(1);
-        }
+        send_wrap(sockfd, data, sizeof(data), 0);
         bzero(data, KILO);
     }
+    return 0;
 }
 
 /*
  * Sends specified error to client
  */
-int send_error(int error, int http_v, int sockfd)
+int send_error(char *header_buf, int error, int http_v, int sockfd)
 {
+    char http_str[10];
+    if (http_v == 1)
+    {
+        memcpy(http_str, "HTTP/1.1 ", strlen("HTTP/1.1 "));
+    }
+    else
+    {
+        memcpy(http_str, "HTTP/1.0 ", strlen("HTTP/1.0 "));
+    }
+    strncpy(header_buf, http_str, strlen("HTTP/1._ "));
+    
+    int curr_idx = strlen(header_buf);
+    
+    switch (error)
+    {
+
+    case BAD_REQ:
+        memcpy(&header_buf[curr_idx], "400 Bad Request\r\n", strlen("400 Bad Request\r\n"));
+        break;
+
+    case FBDN:
+        memcpy(&header_buf[curr_idx], "403 Forbidden\r\n", strlen("403 Forbidden\r\n"));
+        break;
+
+    case NOTFOUND:
+        memcpy(&header_buf[curr_idx], "404 Not Found\r\n", strlen("404 Not Found\r\n"));
+        break;
+
+    case MNA:
+        memcpy(&header_buf[curr_idx], "405 Method Not Allowed\r\n", strlen("405 Method Not Allowed\r\n"));
+        break;
+
+    case HTTP:
+        memcpy(&header_buf[curr_idx], "505 HTTP Version Not Supported\r\n", strlen("505 HTTP Version Not Supported\r\n"));
+        break;
+    }
+    
+    curr_idx = strlen(header_buf);
+    memcpy(&header_buf[curr_idx], "Content-Type: text/plain\r\n", strlen("Content-Type: text/plain\r\n"));
+
+    curr_idx = strlen(header_buf);
+    memcpy(&header_buf[curr_idx], "Content-Length: 0", strlen("Content-Length: 0"));
+
+    curr_idx = strlen(header_buf);
+    memcpy(&header_buf[curr_idx], "\r\n\r\n", strlen("\r\n\r\n"));
+    printf("%s", header_buf);
+    
+    
+    send_wrap(sockfd, header_buf, strlen(header_buf), 0);
+    
     return 0;
+}
+
+void join_threads(int num_threads, pthread_t *thr_arr)
+{ 
+    for (int i = 0; i < num_threads; i++)
+    {
+        pthread_join(thr_arr[i], NULL);
+    }
 }

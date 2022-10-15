@@ -2,119 +2,110 @@
 	C socket server example, handles multiple clients using threads
 */
 
-#include<stdio.h>
-#include<string.h>	//strlen
-#include<stdlib.h>	//strlen
-#include<sys/socket.h>
-#include<arpa/inet.h>	//inet_addr
-#include<unistd.h>	//write
-#include<pthread.h> //for threading , link with lpthread
+#include <tcp_serv.h>
 
 //the thread function
 void *connection_handler(void *);
 
 int main(int argc , char *argv[])
 {
-	int socket_desc , client_sock , c , *new_sock;
-	struct sockaddr_in server , client;
-	
-	//Create socket
-	socket_desc = socket(AF_INET , SOCK_STREAM , 0);
-	if (socket_desc == -1)
-	{
-		printf("Could not create socket");
-	}
-	puts("Socket created");
-	
-	//Prepare the sockaddr_in structure
-	server.sin_family = AF_INET;
-	server.sin_addr.s_addr = INADDR_ANY;
-	server.sin_port = htons( 8888 );
-	
-	//Bind
-	if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
-	{
-		//print the error message
-		perror("bind failed. Error");
-		return 1;
-	}
-	puts("bind done");
-	
-	//Listen
-	listen(socket_desc , 3);
-	
-	//Accept and incoming connection
-	puts("Waiting for incoming connections...");
-	c = sizeof(struct sockaddr_in);
-	
-	//Accept an incoming connection
-	puts("Waiting for incoming connections...");
-	c = sizeof(struct sockaddr_in);
-	while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
-	{
-		puts("Connection accepted");
-		
-		pthread_t sniffer_thread;
-		new_sock = malloc(1);
-		*new_sock = client_sock;
-		
-		if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
-		{
-			perror("could not create thread");
-			return 1;
-		}
-		
-		//Now join the thread , so that we dont terminate before the thread
-		//pthread_join( sniffer_thread , NULL);
-		puts("Handler assigned");
-	}
-	
-	if (client_sock < 0)
-	{
-		perror("accept failed");
-		return 1;
-	}
-	
-	return 0;
+    int socket_desc;
+    struct sockaddr_in server;
+
+    // Create socket
+    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+    
+    
+    int optval = 1;
+    
+    setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR,
+               (const void *)&optval, sizeof(int));
+    if (socket_desc == -1)
+    {
+        printf("Could not create socket");
+    }
+    puts("Socket created");
+
+    // Prepare the sockaddr_in structure
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons(9312);
+
+    // Bind
+    if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
+    {
+        // print the error message
+        perror("bind failed. Error");
+        return 1;
+    }
+    puts("bind done");
+    sem_t listen;
+    sem_init(&listen, 0, 1);
+    
+    thread_args args; // struct passed to requester threads
+    args.socket_desc = socket_desc;
+    args.listen = &listen;
+    
+    int num_threads = 10;
+    pthread_t thread_id_arr[num_threads];
+    for (int i = 0; i < num_threads; i++)
+    { // create requesters
+        pthread_create_wrap(&(thread_id_arr[i]), NULL, connection_handler, (void*)&args);
+    }
+    join_threads(num_threads, thread_id_arr);
+    return 0;
 }
 
 /*
  * This will handle connection for each client
  * */
-void *connection_handler(void *socket_desc)
+void *connection_handler(void *vargs)
 {
-	//Get the socket descriptor
-	int sock = *(int*)socket_desc;
-	int read_size;
-	char *message , client_message[2000];
-	
-	//Send some messages to the client
-	message = "Greetings! I am your connection handler\n";
-	write(sock , message , strlen(message));
-	
-	message = "Now type something and i shall repeat what you type \n";
-	write(sock , message , strlen(message));
-	
-	//Receive a message from client
-	while( (read_size = recv(sock , client_message , 2000 , 0)) > 0 )
-	{
-		//Send the message back to client
-		write(sock , client_message , strlen(client_message));
-	}
-	
-	if(read_size == 0)
-	{
-		puts("Client disconnected");
-		fflush(stdout);
-	}
-	else if(read_size == -1)
-	{
-		perror("recv failed");
-	}
-		
-    close(sock);
-	//Free the socket pointer
-	free(socket_desc);
-	
-	return 0;
+    struct sockaddr_in client;
+    char * client_message = malloc_wrap(MAX_CLNT_MSG_SZ);
+    
+    thread_args *args = (thread_args *)vargs;
+    while (1)
+    {
+        memset(client_message, MAX_CLNT_MSG_SZ, sizeof(char));
+        
+        /**** ONE THREAD LISTENS AT A TIME ****/
+        
+        sem_wait(args->listen);  
+        listen(args->socket_desc, 3);
+
+        puts("Waiting for incoming connections...");
+        int c = sizeof(struct sockaddr_in);
+
+        // accept connection from an incoming client
+        int client_sock = accept_wrap(args->socket_desc, (struct sockaddr *)&client, (socklen_t *)&c);
+        sem_post(args->listen);
+        puts("Connection accepted");
+        
+        /**** END EXCLUSION ZONE ****/
+        
+
+        // Receive a message from client
+        int read_size = recv(client_sock, client_message, MAX_CLNT_MSG_SZ, 0);
+
+        int res = 0;
+        if((res = handle_get(client_message, client_sock)) != 0)
+        {
+            fprintf(stderr, "handle_get returned %d\n", res);    
+        }
+
+        if (read_size == 0)
+        {
+            puts("Client disconnected");
+            fflush(stdout);
+            close(client_sock);
+        }
+        else if (read_size == -1)
+        {
+            perror("recv failed");
+            close(client_sock);
+        }
+    }
+    free(client_message);
+    return 0;
 }

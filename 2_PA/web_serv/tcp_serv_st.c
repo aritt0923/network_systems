@@ -11,6 +11,7 @@ int main(int argc, char *argv[])
     
     
     int optval = 1;
+    
     setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR,
                (const void *)&optval, sizeof(int));
     if (socket_desc == -1)
@@ -36,9 +37,8 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-
         // Listen
-        listen(socket_desc, 3);
+        listen(socket_desc, 10);
 
         // Accept and incoming connection
         puts("Waiting for incoming connections...");
@@ -56,11 +56,12 @@ int main(int argc, char *argv[])
         // Receive a message from client
         read_size = recv(client_sock, client_message, MAX_CLNT_MSG_SZ, 0);
 
-        // Send the message back to client
         int res = 0;
-        res = handle_get(client_message, client_sock);
-
-
+        if((res = handle_get(client_message, client_sock)) != 0)
+        {
+            fprintf(stderr, "handle_get returned %d\n", res);    
+        }
+        
         if (read_size == 0)
         {
             puts("Client disconnected");

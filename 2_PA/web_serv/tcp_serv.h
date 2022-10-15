@@ -7,7 +7,12 @@
 #include <arpa/inet.h> //inet_addr
 #include <unistd.h>    //write
 #include <stdlib.h>
+#include <signal.h>
 #include <errno.h>
+#include <pthread.h> //for threading , link with lpthread
+#include <semaphore.h>
+
+
 
 #include <wrappers.h>
 #include <utilities.h>
@@ -16,6 +21,14 @@
 
 #define KILO 1024
 #define MAX_CLNT_MSG_SZ 2000
+
+
+typedef struct // arguments for requester threads
+{
+    int socket_desc;
+    sem_t *listen;        
+    
+} thread_args;
 
 
 int handle_get(const char *client_req, int sockfd);
@@ -53,7 +66,9 @@ int send_response(FILE *fp, char * header, int sockfd);
 /*
  * Sends specified error to client
  */
-int send_error(int error, int http_v, int sockfd);
+int send_error(char *header_buf, int error, int http_v, int sockfd);
 
+
+void join_threads(int num_threads, pthread_t *thr_arr);
 
 #endif //SERVER_FUNS_H_
