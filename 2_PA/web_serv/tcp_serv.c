@@ -1,35 +1,53 @@
 /*
-	C socket server example, handles multiple clients using threads
+    C socket server example, handles multiple clients using threads
 */
 
 #include <tcp_serv.h>
 
-//the thread function
+// the thread function
 void *connection_handler(void *);
+static void sig_handler(int _);
 
-int main(int argc , char *argv[])
+sem_t keep_running_mut; // protects keep_running global
+
+static int keep_running = 1;
+
+int main(int argc, char *argv[])
 {
+    if (argc != 2)
+    {
+        printf("Usage: ./tcp_serv <port #>\n");
+        return 1;
+    }
+    sem_init(&keep_running_mut, 0, 1);
+
+    signal(SIGINT, sig_handler);
     int socket_desc;
     struct sockaddr_in server;
 
     // Create socket
     socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-    
-    
+
     int optval = 1;
-    
+
     setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR,
                (const void *)&optval, sizeof(int));
     if (socket_desc == -1)
     {
-        printf("Could not create socket");
+        fprintf(stderr, "Could not create socket\n");
     }
-    puts("Socket created");
+
+    int port_num;
+    if (str2int(&port_num, argv[1]) != 0)
+    {
+        printf("invalid port number\n");
+        exit(1);
+    }
 
     // Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(9312);
+    server.sin_port = htons(port_num);
 
     // Bind
     if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
@@ -38,21 +56,31 @@ int main(int argc , char *argv[])
         perror("bind failed. Error");
         return 1;
     }
-    puts("bind done");
-    sem_t listen;
-    sem_init(&listen, 0, 1);
+    // puts("bind done");
+
+    listen_wrap(socket_desc, 256);
+    sem_t accept_sem;
+    sem_init(&accept_sem, 0, 1);
     
+    sem_t socket_sem;
+    sem_init(&socket_sem, 0, 1);
+
     thread_args args; // struct passed to requester threads
     args.socket_desc = socket_desc;
-    args.listen = &listen;
-    
-    int num_threads = 10;
+    args.accept_sem = &accept_sem;
+    args.socket_sem = &socket_sem;
+
+    int num_threads = 20;
     pthread_t thread_id_arr[num_threads];
     for (int i = 0; i < num_threads; i++)
     { // create requesters
-        pthread_create_wrap(&(thread_id_arr[i]), NULL, connection_handler, (void*)&args);
+        pthread_create_wrap(&(thread_id_arr[i]), NULL, connection_handler, (void *)&args);
     }
+    pthread_t socket_closer_thread;
+    pthread_create_wrap(&socket_closer_thread, NULL, socket_closer, (void *)&args);
+    pthread_join(socket_closer_thread, NULL);
     join_threads(num_threads, thread_id_arr);
+    // printf("All threads joined\n");
     return 0;
 }
 
@@ -62,36 +90,52 @@ int main(int argc , char *argv[])
 void *connection_handler(void *vargs)
 {
     struct sockaddr_in client;
-    char * client_message = malloc_wrap(MAX_CLNT_MSG_SZ);
-    
+    char *client_message = malloc_wrap(MAX_CLNT_MSG_SZ);
+    int c = sizeof(struct sockaddr_in);
+
     thread_args *args = (thread_args *)vargs;
     while (1)
     {
-        memset(client_message, MAX_CLNT_MSG_SZ, sizeof(char));
-        
-        /**** ONE THREAD LISTENS AT A TIME ****/
-        
-        sem_wait(args->listen);  
-        listen(args->socket_desc, 3);
+        memset(client_message, '\0', MAX_CLNT_MSG_SZ);
 
-        puts("Waiting for incoming connections...");
-        int c = sizeof(struct sockaddr_in);
+        /**** ONE THREAD ACCEPTS AT A TIME ****/
+
+        sem_wait(args->accept_sem);
+        sem_wait(&keep_running_mut);
+
+        if (!keep_running)
+        {
+            sem_post(&keep_running_mut);
+            sem_post(args->accept_sem);
+            break;
+        }
+        sem_post(&keep_running_mut);
 
         // accept connection from an incoming client
-        int client_sock = accept_wrap(args->socket_desc, (struct sockaddr *)&client, (socklen_t *)&c);
-        sem_post(args->listen);
-        puts("Connection accepted");
-        
+        // printf("Thread %lu listening on socket %d\n", pthread_self(), args->socket_desc);
+        int client_sock = accept(args->socket_desc, (struct sockaddr *)&client, (socklen_t *)&c);
+
+        sem_post(args->accept_sem);
+
+        if (client_sock < 0)
+        {
+            break;
+        }
+
+        // printf("Connection accepted by thread %lu\n", pthread_self());
+
         /**** END EXCLUSION ZONE ****/
-        
 
         // Receive a message from client
+        sem_wait(args->socket_sem);
         int read_size = recv(client_sock, client_message, MAX_CLNT_MSG_SZ, 0);
+        sem_post(args->socket_sem);
+        
 
         int res = 0;
-        if((res = handle_get(client_message, client_sock)) != 0)
+        if ((res = handle_get(client_message, client_sock, args->socket_sem)) != 0)
         {
-            fprintf(stderr, "handle_get returned %d\n", res);    
+            fprintf(stderr, "handle_get returned %d\n", res);
         }
 
         if (read_size == 0)
@@ -106,6 +150,35 @@ void *connection_handler(void *vargs)
             close(client_sock);
         }
     }
+    // printf("Thread %lu broke out of while loop.\n", pthread_self());
+
     free(client_message);
     return 0;
+}
+
+void *socket_closer(void *vargs)
+{
+    thread_args *args = (thread_args *)vargs;
+    while (1)
+    {
+        sem_wait(&keep_running_mut);
+        if (!keep_running)
+        {
+            sem_post(&keep_running_mut);
+            break;
+        }
+        sem_post(&keep_running_mut);
+    }
+    shutdown(args->socket_desc, SHUT_RD);
+    // printf("Closing socket %d\n", args->socket_desc);
+    return NULL;
+}
+
+static void sig_handler(int _)
+{
+    (void)_;
+    // printf("Entered handler\n");
+    sem_wait(&keep_running_mut);
+    keep_running = 0;
+    sem_post(&keep_running_mut);
 }

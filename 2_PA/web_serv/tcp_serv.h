@@ -11,8 +11,7 @@
 #include <errno.h>
 #include <pthread.h> //for threading , link with lpthread
 #include <semaphore.h>
-
-
+#include <signal.h>
 
 #include <wrappers.h>
 #include <utilities.h>
@@ -26,12 +25,14 @@
 typedef struct // arguments for requester threads
 {
     int socket_desc;
-    sem_t *listen;        
+    sem_t *accept_sem;
+    sem_t *socket_sem;
+    int thread_id;      
     
 } thread_args;
 
 
-int handle_get(const char *client_req, int sockfd);
+int handle_get(const char *client_req, int sockfd, sem_t *socket_sem);
  
 /*
  * Parses the clients request, returns 0 for success.
@@ -61,14 +62,20 @@ int build_header(char * filetype, char* header_buf, int http_v, int filesize);
  *      404: File Not Found
  *      405: Forbidden
  */
-int send_response(FILE *fp, char * header, int sockfd);
+int send_response(FILE *fp, char * header, int sockfd, sem_t *socket_sem);
 
 /*
  * Sends specified error to client
  */
-int send_error(char *header_buf, int error, int http_v, int sockfd);
+int send_error(char *header_buf, int error, int http_v, int sockfd, sem_t *socket_sem);
 
 
 void join_threads(int num_threads, pthread_t *thr_arr);
+
+
+
+void *socket_closer(void *vargs);
+
+
 
 #endif //SERVER_FUNS_H_

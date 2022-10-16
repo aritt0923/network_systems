@@ -27,7 +27,13 @@ int pthread_create_wrap(pthread_t *restrict thread,
                    void *restrict arg);
                    
                    
+int listen_wrap(int sockfd, int backlog);
+                   
+/*            
+    
 int accept_wrap(int sockfd, struct sockaddr *restrict addr,
                   socklen_t *restrict addrlen);
+                  
+*/
 
 #endif // WRAPPERS_H_

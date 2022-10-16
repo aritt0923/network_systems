@@ -47,6 +47,20 @@ int pthread_create_wrap(pthread_t *restrict thread,
     return res;
 }
 
+ int listen_wrap(int sockfd, int backlog)
+ {
+    int res;
+    if((res = listen(sockfd, backlog)) != 0)
+    {
+        perror("listen failed");
+        exit(1);
+    }
+    return res;
+ }
+/* 
+ * Accept returns error when sockfd is closed by another thread
+ * But we want that behavior, so we need to use the function itself
+ * in the main code
 
 int accept_wrap(int sockfd, struct sockaddr *restrict addr,
                   socklen_t *restrict addrlen)
@@ -59,3 +73,5 @@ int accept_wrap(int sockfd, struct sockaddr *restrict addr,
     }
     return res;
 }
+
+*/
