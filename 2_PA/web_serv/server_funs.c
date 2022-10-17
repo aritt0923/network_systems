@@ -320,6 +320,8 @@ int send_error(char *header_buf, int error, int http_v, int sockfd, sem_t *socke
     sem_wait(socket_sem);
     send_wrap(sockfd, header_buf, strlen(header_buf), 0);
     sem_post(socket_sem);
+    printf("Thread %ld sent %s\n", pthread_self(), header_buf);
+    
     return 0;
 }
 

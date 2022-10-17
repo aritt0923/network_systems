@@ -142,13 +142,13 @@ void *connection_handler(void *vargs)
         {
             puts("Client disconnected");
             fflush(stdout);
-            close(client_sock);
         }
         else if (read_size == -1)
         {
             perror("recv failed");
-            close(client_sock);
         }
+        close(client_sock);
+        
     }
     // printf("Thread %lu broke out of while loop.\n", pthread_self());
 
