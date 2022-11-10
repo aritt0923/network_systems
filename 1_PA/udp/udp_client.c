@@ -292,9 +292,6 @@ int send_exit(struct send_rec_args *args)
     }
     fprintf(stderr, "Server did not say goodbye :(\n");
     exit(1);
-    
-    
-    
 }
 
 int rec_file_from_server(char *filename, struct send_rec_args *args)

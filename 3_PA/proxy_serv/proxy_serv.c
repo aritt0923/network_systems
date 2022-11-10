@@ -2,7 +2,7 @@
     C socket server example, handles multiple clients using threads
 */
 
-#include <tcp_serv.h>
+#include <proxy_serv_funs.h>
 
 // the thread function
 void *connection_handler(void *);

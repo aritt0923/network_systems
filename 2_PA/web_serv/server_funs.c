@@ -223,7 +223,7 @@ int build_header(char *filetype, char *header_buf, int http_v, int filesize)
     memcpy(&header_buf[curr_idx], "Content-Length: ", strlen("Content-Length: "));
 
     int fs_str_len = snprintf(NULL, 0, "%d", filesize);
-    char *fs_str = malloc(fs_str_len + 1);
+    char *fs_str = malloc_wrap(fs_str_len + 1);
     snprintf(fs_str, fs_str_len + 1, "%d", filesize);
     curr_idx = strlen(header_buf);
     memcpy(&header_buf[curr_idx], fs_str, fs_str_len);
