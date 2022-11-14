@@ -1,4 +1,8 @@
+
 #include <utilities.h>
+#include <proxy_serv_funs.h>
+#include <wrappers.h>
+#include <status_codes.h>
 
 int str_to_lower(char * str, int len)
 {
@@ -69,4 +73,48 @@ int md5_str(char * url, char * hash_res_buf)
         sprintf(&hash_res_buf[str_idx], "%02x", md_value[i]);
         str_idx += 2;
     }
+    return 0;
+}
+
+// https://beej.us/guide/bgnet/examples/client.c
+// get sockaddr, IPv4 or IPv6:
+void *get_in_addr(struct sockaddr *sa) 
+{
+    if (sa->sa_family == AF_INET)
+    {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+
+int init_params(req_params *params)
+{
+    params->req_type = calloc_wrap(MAX_REQ_TYPE_LEN, sizeof(char));
+    params->url = calloc_wrap(MAX_URL_LEN, sizeof(char));
+    params->hostname = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
+    params->port_num = calloc_wrap(MAX_PORT_NUM_LEN, sizeof(char));
+    params->filepath = calloc_wrap(MAX_URL_LEN, sizeof(char));
+    params->query = calloc_wrap(MAX_URL_LEN, sizeof(char));
+
+    params->http_v = -1; // for error checking
+
+    params->port_num_len = 0;
+    params->req_type_len = 0;
+    params->url_len = 0;
+    params->hostname_len = 0;
+    params->filepath_len = 0;
+    params->query_len = 0;
+    return 0;
+}
+
+int free_params(req_params *params)
+{
+    free(params->port_num);
+    free(params->req_type);
+    free(params->url);
+    free(params->hostname);
+    free(params->filepath);
+    free(params->query);
+    return 0;
 }

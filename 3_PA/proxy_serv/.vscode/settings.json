@@ -3,6 +3,7 @@
         "*.ejs": "html",
         "*.txt": "plaintext",
         "proxy_serv_funs.h": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "string.h": "c"
     }
 }

@@ -1,17 +1,29 @@
 #ifndef UTILITIES_H_
 #define UTILITIES_H_
 
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <ctype.h> // tolower
-#include <errno.h>
-#include <limits.h>
+#include <ctype.h>
+#include <string.h> //strlen
+
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
+#include <arpa/inet.h> //inet_addr
 
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+
+#include <unistd.h>    //write
+#include <stdlib.h>
+#include <signal.h>
+#include <errno.h>
+#include <pthread.h> //for threading , link with lpthread
+#include <semaphore.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <proxy_serv_funs.h>
 
 
 // https://stackoverflow.com/questions/7021725/how-to-convert-a-string-to-integer-in-c
@@ -30,6 +42,22 @@ int get_file_size(FILE *fileptr);
 str2int_errno str2int(int *out, char *s);
 
 int md5_str(char * url, char * hash_res_buf);
+
+void *get_in_addr(struct sockaddr *sa);
+
+
+/* Source: utilities.c
+ * Callocs buffers and initializes data
+ * for the passed req_params struct
+ */
+int init_params(req_params *params);
+
+
+/* Source: utilities.c
+ * Frees allocated memory
+ * for the passed params struct
+ */
+int free_params(req_params *params);
 
 
 #endif // UTILITIES_H_

@@ -1,17 +1,15 @@
 CC=gcc
-OBJS = wrappers.o server_funs.o utilities.o
+OBJS = proxy_serv.o wrappers.o server_funs.o proxy_funs.o utilities.o cache.o
 CFLAGS=-I. -Wall -Wextra
-DEPS = tcp_serv.h status_codes.h wrappers.h utilities.h
-LDFLAGS = -lpthread
+DEPS = proxy_serv_funs.h status_codes.h wrappers.h utilities.h cache.h
+LDFLAGS = -lpthread -lcrypto
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS) $(LDFLAGS)
 
-thread: tcp_serv.o wrappers.o server_funs.o utilities.o 
-	$(CC) -o tcp_serv tcp_serv.o $(OBJS) $(LDFLAGS)
+tcp_serv: proxy_serv.o wrappers.o server_funs.o proxy_funs.o utilities.o cache.o
+	$(CC) -o proxy_serv $(OBJS) $(LDFLAGS)
 	
-tcp_serv_st: tcp_serv_st.o $(OBJS)
-	$(CC) -o tcp_serv_st tcp_serv_st.o $(OBJS) $(LDFLAGS)
 	
 
 	

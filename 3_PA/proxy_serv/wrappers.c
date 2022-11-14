@@ -57,6 +57,7 @@ int pthread_create_wrap(pthread_t *restrict thread,
     }
     return res;
  }
+
 /* 
  * Accept returns error when sockfd is closed by another thread
  * But we want that behavior, so we need to use the function itself

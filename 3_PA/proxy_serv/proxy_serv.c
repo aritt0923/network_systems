@@ -3,6 +3,10 @@
 */
 
 #include <proxy_serv_funs.h>
+#include <utilities.h>
+#include <status_codes.h>
+#include <wrappers.h>
+
 
 // the thread function
 void *connection_handler(void *);
@@ -65,8 +69,14 @@ int main(int argc, char *argv[])
     
     sem_t socket_sem;
     sem_init(&socket_sem, 0, 1);
-
+    
+    hash_table *cache = calloc_wrap(1, sizeof(hash_table));
+    int buckets = 100;
+    int ttl_seconds = 60;
+    create_hash_table(cache, buckets, ttl_seconds);
+    
     thread_args args; // struct passed to requester threads
+    args.cache = cache;
     args.socket_desc = socket_desc;
     args.accept_sem = &accept_sem;
     args.socket_sem = &socket_sem;
@@ -81,6 +91,7 @@ int main(int argc, char *argv[])
     pthread_create_wrap(&socket_closer_thread, NULL, socket_closer, (void *)&args);
     pthread_join(socket_closer_thread, NULL);
     join_threads(num_threads, thread_id_arr);
+    free_hash_table(cache);
     // printf("All threads joined\n");
     return 0;
 }
@@ -91,13 +102,13 @@ int main(int argc, char *argv[])
 void *connection_handler(void *vargs)
 {
     struct sockaddr_in client;
-    char *client_message = malloc_wrap(MAX_CLNT_MSG_SZ);
+    char *client_message = malloc_wrap(MAX_MSG_SZ);
     int c = sizeof(struct sockaddr_in);
 
     thread_args *args = (thread_args *)vargs;
     while (1)
     {
-        memset(client_message, '\0', MAX_CLNT_MSG_SZ);
+        memset(client_message, '\0', MAX_MSG_SZ);
 
         /**** ONE THREAD ACCEPTS AT A TIME ****/
 
@@ -129,12 +140,12 @@ void *connection_handler(void *vargs)
 
         // Receive a message from client
         sem_wait(args->socket_sem);
-        int read_size = recv(client_sock, client_message, MAX_CLNT_MSG_SZ, 0);
+        int read_size = recv(client_sock, client_message, MAX_MSG_SZ, 0);
         sem_post(args->socket_sem);
         
 
         int res = 0;
-        if ((res = handle_get(client_message, client_sock, args->socket_sem)) != 0)
+        if ((res = handle_get(args->cache, client_message, client_sock, args->socket_sem)) != 0)
         {
             fprintf(stderr, "handle_get returned %d\n", res);
         }

@@ -3,9 +3,19 @@
 
 #include <stdio.h>
 #include <string.h> //strlen
+
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <netdb.h>
 #include <arpa/inet.h> //inet_addr
+#include <sys/stat.h>
+
+#include <openssl/evp.h>
+#include <openssl/ssl.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
+
+#include <fcntl.h>
 #include <unistd.h>    //write
 #include <stdlib.h>
 #include <signal.h>
@@ -14,23 +24,27 @@
 #include <semaphore.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <wrappers.h>
-#include <utilities.h>
-#include <status_codes.h>
+
+#include <time.h>
+#include <cache.h>
 
 
 #define KILO 1024
-#define MAX_CLNT_MSG_SZ KILO*2
+#define MAX_MSG_SZ KILO*2
 
 #define MAX_REQ_TYPE_LEN 5
 #define MAX_URL_LEN KILO
 #define MAX_HOSTNAME_LEN KILO
-#define MAX_HTTP_V_LEN 10
+#define MAX_PORT_NUM_LEN 6
+#define MAX_FILETYPE_SIZE 64
 #define EVP_MAX_MD_SIZE 64
+
+#define DEFAULT_PORT "80"
 
 
 typedef struct // arguments for requester threads
 {
+    hash_table *cache;
     int socket_desc;
     sem_t *accept_sem;
     sem_t *socket_sem;
@@ -43,34 +57,33 @@ typedef struct
     char * req_type;
     char * url;
     char * hostname;
+    char * port_num;
+    char * filepath;
+    char * query;
     
     int http_v;
+    int port_num_len;
     int req_type_len;
     int url_len;
     int hostname_len;
-    int http_v_len;
+    int filepath_len;
+    int query_len;
 } req_params;
 
-typedef struct 
-{
-    char * url;
-    char * md5_hash;
-    unsigned int filesize;
-    char * filetype;
-    int age_sec;
-} cache_entry;
+
+
 
 /* Source: server_funs.c
  * Entry point for all server_funs.c && proxy_funs.c functions
  * Accepts GET request from client and responds appropriately
  */
-int handle_get(const char *client_req, int sockfd, sem_t *socket_sem);
+int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *socket_sem);
+
  
-/* Source: server_funs.c
- * Parses the clients request, returns 0 for success.
+/*
+ * Parses the clients request into req_params struct
+ * Returns 0 for success
  * Catches:
- *      405: Method Not Allowed
- *      505: HTTP Version Not Supported
  *      400: Bad Request
  */
 int parse_req(const char *client_req, req_params *params);         
@@ -85,7 +98,8 @@ int get_filetype(char * filename, char* filetype_buf);
 /* Source: server_funs.c
  * builds header for server response
  */
-int build_header(req_params *params, char* header_buf);
+int build_header(req_params *params, struct cache_node *file, char *header_buf);
+
 
 /* Source: server_funs.c
  * Sends file pointed to by FP to client
@@ -106,6 +120,7 @@ int send_error(int error, req_params *params, int sockfd, sem_t *socket_sem);
 void join_threads(int num_threads, pthread_t *thr_arr);
 
 
+
 /* Source: proxy_serv.c
  * Thread function
  * Closes socket, breaking hanging accept() function 
@@ -114,22 +129,29 @@ void join_threads(int num_threads, pthread_t *thr_arr);
 void *socket_closer(void *vargs);
 
 
-/*
+/* Source: proxy_funs.c
  * Accepts GET request from client-side
  * Relays request to remote server
  * Creates cache entry for resulting file  
  * Catches: 
- *      403: Forbidden
+ *      returns server error if any
  */
-int fetch_remote(const char* url, int http_v, const char *host);
+int fetch_remote(hash_table *cache, const char *client_req, 
+        req_params *params, struct cache_node *file, int client_sockfd, sem_t *socket_sem);
 
-int req_params_init(req_params *params);
+int send_file_from_cache(hash_table *cache, struct cache_node *file, req_params *params, int sockfd, sem_t *socket_sem);
 
-int free_params(req_params *params);
+int connect_remote(int *serv_sockfd, req_params *params);
 
-int send_from_cache(req_params *params, char * md5_hash, int sockfd, sem_t *socket_sem);
+int parse_header(char * header_packet, struct cache_node *file);
 
-bool check_cache(char * md5_hash);
+int get_full_filepath(char *filepath, struct cache_node *file);
+
+int check_ttl(hash_table *cache, struct cache_node *file, int ttl_seconds);
+
+double diff_timespec(const struct timespec *time1, const struct timespec *time0);
+
+int prepare_cache_node(struct cache_node *file, req_params *params);
 
 
 #endif //PROXY_SERV_FUNS_H_
