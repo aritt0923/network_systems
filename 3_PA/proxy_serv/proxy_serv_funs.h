@@ -62,12 +62,7 @@ typedef struct
     char * query;
     
     int http_v;
-    int port_num_len;
-    int req_type_len;
-    int url_len;
-    int hostname_len;
-    int filepath_len;
-    int query_len;
+    int dynamic;
 } req_params;
 
 
@@ -151,7 +146,8 @@ int check_ttl(hash_table *cache, struct cache_node *file, int ttl_seconds);
 
 double diff_timespec(const struct timespec *time1, const struct timespec *time0);
 
-int prepare_cache_node(struct cache_node *file, req_params *params);
+int check_dynamic(char *url);
 
+int check_blocklist(char *hostname);
 
 #endif //PROXY_SERV_FUNS_H_

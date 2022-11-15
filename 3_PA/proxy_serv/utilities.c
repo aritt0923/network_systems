@@ -98,13 +98,7 @@ int init_params(req_params *params)
     params->query = calloc_wrap(MAX_URL_LEN, sizeof(char));
 
     params->http_v = -1; // for error checking
-
-    params->port_num_len = 0;
-    params->req_type_len = 0;
-    params->url_len = 0;
-    params->hostname_len = 0;
-    params->filepath_len = 0;
-    params->query_len = 0;
+    params->dynamic = 0; // don't cache dynamic files
     return 0;
 }
 

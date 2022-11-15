@@ -33,7 +33,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
     char *md5_hash = calloc_wrap(EVP_MAX_MD_SIZE, sizeof(char));
     char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
     memcpy(str_to_hash, params->hostname, strlen(params->hostname));
-    memcpy(&str_to_hash[params->hostname_len], params->filepath, params->filepath_len);
+    memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
     md5_str(str_to_hash, md5_hash);
     
     free(str_to_hash);
@@ -72,11 +72,6 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
  *  params->hostname;
  *  params->port_num;
  *
- *  params->http_v;
- *  params->req_type_len;
- *  params->url_len;
- *  params->hostname_len;
- *
  * Example request:
  *  GET http://www.yahoo.com/ HTTP/1.1
  *  Host: www.yahoo.com
@@ -93,10 +88,9 @@ int parse_req(const char *client_req, req_params *params)
         fprintf(stderr, "METHOD NOT ALLOWED in parse_req\n");
         return BAD_REQ;
     }
-    params->req_type_len = 3;
-    memcpy(params->req_type, "GET", params->req_type_len);
+    memcpy(params->req_type, "GET", strlen("GET"));
 #ifdef PRINT_PARAMS
-    printf("params->req_type: %s\nparams->req_type_len: %d\n\n", params->req_type, params->req_type_len);
+    printf("params->req_type: %s\n\n", params->req_type);
 #endif // PRINT_PARAMS
 
     // get URL
@@ -115,11 +109,15 @@ int parse_req(const char *client_req, req_params *params)
         fprintf(stderr, "BAD REQUEST in parse_req\n");
         return BAD_REQ;
     }
+    if((url_end_idx - url_start_idx) > MAX_URL_LEN)
+    {
+        fprintf(stderr, "URL too long\n");
+        return BAD_REQ;
+    }
     strncpy(params->url, &client_req[4], url_end_idx - url_start_idx);
-    params->url_len = strlen(params->url);
-    str_to_lower(params->url, params->url_len);
+    str_to_lower(params->url, strlen(params->url));
 #ifdef PRINT_PARAMS
-    printf("params->url: %s\nparams->url_len: %d\n\n", params->url, params->url_len);
+    printf("params->url: %s\n\n", params->url);
 #endif // PRINT_PARAMS
 
     // pull filepath from url
@@ -138,16 +136,13 @@ int parse_req(const char *client_req, req_params *params)
     if (filepath_start_idx == -1)
     {
         memcpy(params->filepath, "/", 1);
-        params->filepath_len = 1;
     }
     else
     {
-        params->filepath_len = url_end_idx - filepath_start_idx;
-
-        strncpy(params->filepath, &client_req[url_start_idx], params->filepath_len);
+        strncpy(params->filepath, &client_req[url_start_idx], url_end_idx-filepath_start_idx);
     }
 #ifdef PRINT_PARAMS
-    printf("params->filepath: %s\nparams->filepath_len: %d\n\n", params->filepath, params->filepath_len);
+    printf("params->filepath: %s\n\n", params->filepath);
 #endif // PRINT_PARAMS
 
     // get port_num from URL
@@ -157,21 +152,22 @@ int parse_req(const char *client_req, req_params *params)
 
     if (port_num_tmp != NULL)
     {
-        int port_num_len = -1;
         port_num_tmp = &port_num_tmp[1];
-        for (int i = 0; i < 5; i++)
+        int i;
+        for (i = 0; i < 5; i++)
         {
             if (!isdigit((unsigned char)port_num_tmp[i]))
             {
-                port_num_len = i;
                 break;
             }
         }
-        if (port_num_len > 0)
+        if (i > 0)
         {
-            memcpy(port_num_url, port_num_tmp, port_num_len);
+            memcpy(port_num_url, port_num_tmp, strlen(port_num_tmp));
         }
     }
+    
+    params->dynamic = check_dynamic(params->url);
 
     // get http ver
     char http_str[9];
@@ -224,26 +220,23 @@ int parse_req(const char *client_req, req_params *params)
     port_num_tmp = strrchr(hostname_tmp, ':');
     char port_num_hn[5];
     memset(port_num_hn, '\0', 5);
-    int hostname_len = strlen(hostname_tmp);
     if (port_num_tmp != NULL)
     {
-        hostname_len = (port_num_tmp - hostname_tmp);
-        int port_num_len = -1;
         port_num_tmp = &port_num_tmp[1];
-        for (int i = 0; i < 5; i++)
+        int i;
+        for (i = 0; i < 5; i++)
         {
             if (!isdigit((unsigned char)port_num_tmp[i]))
             {
-                port_num_len = i;
                 break;
             }
         }
-        if (port_num_len > 0)
+        if (i > 0)
         {
-            memcpy(port_num_hn, port_num_tmp, port_num_len);
+            memcpy(port_num_hn, port_num_tmp, strlen(port_num_tmp));
         }
     }
-    memcpy(params->hostname, hostname_tmp, hostname_len);
+    memcpy(params->hostname, hostname_tmp, strlen(hostname_tmp));
 #ifdef PRINT_PARAMS
     printf("params->hostname: %s\n\n", params->hostname);
 #endif // PRINT_PARAMS
@@ -477,4 +470,20 @@ int send_file_from_cache(hash_table *cache, struct cache_node *file, req_params 
     free(header_buf);
     release_ll_rwlock(cache, file);
     return 0;
+}
+
+
+int check_dynamic(char * url)
+{
+    char * query = strstr(url, "?");
+    if(query == NULL)
+    {
+        return 0;
+    }
+    return 1;
+}
+
+int check_blocklist(char *hostname)
+{
+    
 }

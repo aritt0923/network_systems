@@ -21,7 +21,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
         file = get_cache_node();
         char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
         memcpy(str_to_hash, params->hostname, strlen(params->hostname));
-        memcpy(&str_to_hash[params->hostname_len], params->filepath, params->filepath_len);
+        memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
         md5_str(str_to_hash, file->md5_hash);
         free(str_to_hash);
     }
@@ -41,6 +41,10 @@ int fetch_remote(hash_table *cache, const char *client_req,
     int header_size = 0;
     int bytes_rem;
     int cache_flag = 1;
+    if(params->dynamic)
+    {
+        cache_flag = 0;
+    }
     while (bytes_recvd > 0)
     {
         sem_wait(socket_sem);
@@ -64,9 +68,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
             if (cache_flag)
             {
                 add_cache_entry(cache, file);
-
-                printf("entered cache_flag\n");
-
+                
                 get_ll_wlock(cache, file);
                 // get a file pointer to the file we're looking for
                 char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
@@ -113,6 +115,10 @@ int fetch_remote(hash_table *cache, const char *client_req,
     if (cache_flag)
     {
         release_ll_rwlock(cache, file);
+    }
+    else
+    {
+        free_cache_node(file);
     }
     return 0;
 }
@@ -266,10 +272,3 @@ int connect_remote(int *serv_sockfd, req_params *params)
     return 0;
 }
 
-/*
-int prepare_cache_node(struct cache_node *file, req_params *params)
-{
-
-    return 0;
-}
-*/

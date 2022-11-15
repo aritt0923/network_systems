@@ -18,9 +18,9 @@ static int keep_running = 1;
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2)
+    if (argc != 3)
     {
-        printf("Usage: ./tcp_serv <port #>\n");
+        printf("Usage: ./tcp_serv <port #> <time to live (seconds)>\n");
         return 1;
     }
     sem_init(&keep_running_mut, 0, 1);
@@ -47,7 +47,13 @@ int main(int argc, char *argv[])
         printf("invalid port number\n");
         exit(1);
     }
-
+    int ttl_seconds;
+    if (str2int(&ttl_seconds, argv[2]) != 0)
+    {
+        printf("invalid time to live\n");
+        exit(1);
+    }
+    
     // Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
@@ -72,7 +78,6 @@ int main(int argc, char *argv[])
     
     hash_table *cache = calloc_wrap(1, sizeof(hash_table));
     int buckets = 100;
-    int ttl_seconds = 60;
     create_hash_table(cache, buckets, ttl_seconds);
     
     thread_args args; // struct passed to requester threads
@@ -92,7 +97,7 @@ int main(int argc, char *argv[])
     pthread_join(socket_closer_thread, NULL);
     join_threads(num_threads, thread_id_arr);
     free_hash_table(cache);
-    // printf("All threads joined\n");
+    printf("All threads joined and hash table freed\n");
     return 0;
 }
 
