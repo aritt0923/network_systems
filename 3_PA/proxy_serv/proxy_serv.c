@@ -6,7 +6,8 @@
 #include <utilities.h>
 #include <status_codes.h>
 #include <wrappers.h>
-
+#include <sys/types.h>
+#include <sys/stat.h>
 
 // the thread function
 void *connection_handler(void *);
@@ -25,6 +26,13 @@ int main(int argc, char *argv[])
     }
     sem_init(&keep_running_mut, 0, 1);
 
+    struct stat st = {0};
+
+    if (stat("./cache", &st) == -1)
+    {
+        mkdir(".cache", 0700);
+    }
+    
     signal(SIGINT, sig_handler);
     int socket_desc;
     struct sockaddr_in server;
@@ -53,7 +61,7 @@ int main(int argc, char *argv[])
         printf("invalid time to live\n");
         exit(1);
     }
-    
+
     // Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
@@ -69,17 +77,17 @@ int main(int argc, char *argv[])
     // puts("bind done");
 
     listen_wrap(socket_desc, 256);
-    
+
     sem_t accept_sem;
     sem_init(&accept_sem, 0, 1);
-    
+
     sem_t socket_sem;
     sem_init(&socket_sem, 0, 1);
-    
+
     hash_table *cache = calloc_wrap(1, sizeof(hash_table));
     int buckets = 100;
     create_hash_table(cache, buckets, ttl_seconds);
-    
+
     thread_args args; // struct passed to requester threads
     args.cache = cache;
     args.socket_desc = socket_desc;
@@ -147,7 +155,6 @@ void *connection_handler(void *vargs)
         sem_wait(args->socket_sem);
         int read_size = recv(client_sock, client_message, MAX_MSG_SZ, 0);
         sem_post(args->socket_sem);
-        
 
         int res = 0;
         if ((res = handle_get(args->cache, client_message, client_sock, args->socket_sem)) != 0)
@@ -165,7 +172,6 @@ void *connection_handler(void *vargs)
             perror("recv failed");
         }
         close(client_sock);
-        
     }
     // printf("Thread %lu broke out of while loop.\n", pthread_self());
 
