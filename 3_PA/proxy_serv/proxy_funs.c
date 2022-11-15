@@ -9,7 +9,6 @@
 int fetch_remote(hash_table *cache, const char *client_req,
                  req_params *params, struct cache_node *file, int client_sockfd, sem_t *socket_sem)
 {
-    
     int res;
     int serv_sockfd;
     if ((res = connect_remote(&serv_sockfd, params)) != 0)
@@ -294,12 +293,9 @@ int check_blocklist(char *hostname, char * ip_addr)
     memcpy(prepend_www_str, "www.", strlen("www."));
     
     memcpy(&prepend_www_str[strlen("www.")], hostname, strlen(hostname));
-    printf("prepend_www_str: %s\n", prepend_www_str);
-    printf("hostname: %s\n", hostname);
-    printf("ip_addr: %s\n", ip_addr);    
+  
     
     while ((read = getline(&blocked_host, &len, blocklist)) != -1) {
-        printf("blocked_host: %s\n", blocked_host);
         if(strncmp(blocked_host, hostname, read-1) == 0)
         {
             free(prepend_www_str);

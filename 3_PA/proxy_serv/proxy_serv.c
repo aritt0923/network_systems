@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
 
     if (stat("./cache", &st) == -1)
     {
-        mkdir(".cache", 0700);
+        mkdir("./cache", 0777);
     }
     
     signal(SIGINT, sig_handler);
@@ -105,7 +105,6 @@ int main(int argc, char *argv[])
     pthread_join(socket_closer_thread, NULL);
     join_threads(num_threads, thread_id_arr);
     free_hash_table(cache);
-    printf("All threads joined and hash table freed\n");
     return 0;
 }
 

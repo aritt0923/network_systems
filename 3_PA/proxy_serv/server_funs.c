@@ -48,6 +48,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
         return -1;
     }
     
+    
     if (res == 0)
     { // ttl is not expired
     
@@ -82,7 +83,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
  */
 int parse_req(const char *client_req, req_params *params)
 {
-#define PRINT_PARAMS
+//#define PRINT_PARAMS
 #ifdef FUN_TRACE
     printf("Entered parse_req\n\n");
 #endif // FUN_TRACE
