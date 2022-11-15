@@ -148,6 +148,6 @@ double diff_timespec(const struct timespec *time1, const struct timespec *time0)
 
 int check_dynamic(char *url);
 
-int check_blocklist(char *hostname);
+int check_blocklist(char *hostname, char * ip_addr);
 
 #endif //PROXY_SERV_FUNS_H_

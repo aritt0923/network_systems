@@ -32,6 +32,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
     }
     char *md5_hash = calloc_wrap(EVP_MAX_MD_SIZE, sizeof(char));
     char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
+    
     memcpy(str_to_hash, params->hostname, strlen(params->hostname));
     memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
     md5_str(str_to_hash, md5_hash);
@@ -40,6 +41,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
     
     
     struct cache_node *file = get_cache_entry(cache, md5_hash);
+    free(md5_hash);
     
     if ((res = check_ttl(cache, file, cache->ttl_seconds)) < 0)
     {
@@ -52,9 +54,11 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
         return (send_file_from_cache(cache, file, params, sockfd, socket_sem));
     }
     // need to fetch remote
-    if ((res = fetch_remote(cache, client_req, params, file, sockfd, socket_sem)) != 0)
+    res = fetch_remote(cache, client_req, params, file, sockfd, socket_sem);
+    if (res != 0)
     { // exit point for any errors returned by parse_req
-        fprintf(stderr, "error in parse_req\n");
+        fprintf(stderr, "error in connect_remote\n");
+        printf("res = %d\n", res);
         send_error(res, params, sockfd, socket_sem);
         return res;
     }
@@ -78,7 +82,7 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
  */
 int parse_req(const char *client_req, req_params *params)
 {
-//#define PRINT_PARAMS
+#define PRINT_PARAMS
 #ifdef FUN_TRACE
     printf("Entered parse_req\n\n");
 #endif // FUN_TRACE
@@ -220,8 +224,10 @@ int parse_req(const char *client_req, req_params *params)
     port_num_tmp = strrchr(hostname_tmp, ':');
     char port_num_hn[5];
     memset(port_num_hn, '\0', 5);
+    int hostname_len = strlen(hostname_tmp);
     if (port_num_tmp != NULL)
     {
+        hostname_len = (port_num_tmp - hostname_tmp);
         port_num_tmp = &port_num_tmp[1];
         int i;
         for (i = 0; i < 5; i++)
@@ -236,7 +242,7 @@ int parse_req(const char *client_req, req_params *params)
             memcpy(port_num_hn, port_num_tmp, strlen(port_num_tmp));
         }
     }
-    memcpy(params->hostname, hostname_tmp, strlen(hostname_tmp));
+    memcpy(params->hostname, hostname_tmp, hostname_len);
 #ifdef PRINT_PARAMS
     printf("params->hostname: %s\n\n", params->hostname);
 #endif // PRINT_PARAMS
@@ -378,6 +384,9 @@ int send_error(int error, req_params *params, int sockfd, sem_t *socket_sem)
     case HTTP:
         memcpy(&header_buf[curr_idx], "505 HTTP Version Not Supported\r\n", strlen("505 HTTP Version Not Supported\r\n"));
         break;
+    case BAD_RESP:
+        memcpy(&header_buf[curr_idx], "500 Internal Server Error\r\n", strlen("500 Internal Server Error\r\n"));
+        break;
     }
 
     curr_idx = strlen(header_buf);
@@ -483,7 +492,3 @@ int check_dynamic(char * url)
     return 1;
 }
 
-int check_blocklist(char *hostname)
-{
-    
-}

@@ -9,9 +9,10 @@
 int fetch_remote(hash_table *cache, const char *client_req,
                  req_params *params, struct cache_node *file, int client_sockfd, sem_t *socket_sem)
 {
+    
     int res;
     int serv_sockfd;
-    if ((res = connect_remote(&serv_sockfd, params) != 0))
+    if ((res = connect_remote(&serv_sockfd, params)) != 0)
     {
         return (res);
     }
@@ -263,12 +264,64 @@ int connect_remote(int *serv_sockfd, req_params *params)
         fprintf(stderr, "client: failed to connect\n");
         return NOTFOUND;
     }
-
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof s);
 
     printf("client: connecting to %s\n", s);
+    int res;
+    if((res = check_blocklist(params->hostname, s)) != 0)
+    {
+        return res;
+    }
 
     freeaddrinfo(servinfo);
     return 0;
 }
 
+int check_blocklist(char *hostname, char * ip_addr)
+{
+    FILE * blocklist;
+    blocklist = fopen(".blocklist", "r");
+    if (blocklist == NULL)
+    {
+        return 0;
+    }
+    char * blocked_host = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
+    size_t len = MAX_HOSTNAME_LEN;
+    ssize_t read;
+    
+    char * prepend_www_str = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
+    
+    memcpy(prepend_www_str, "www.", strlen("www."));
+    
+    memcpy(&prepend_www_str[strlen("www.")], hostname, strlen(hostname));
+    printf("prepend_www_str: %s\n", prepend_www_str);
+    printf("hostname: %s\n", hostname);
+    printf("ip_addr: %s\n", ip_addr);    
+    
+    while ((read = getline(&blocked_host, &len, blocklist)) != -1) {
+        printf("blocked_host: %s\n", blocked_host);
+        if(strncmp(blocked_host, hostname, read-1) == 0)
+        {
+            free(prepend_www_str);
+            free(blocked_host);
+            return FBDN;
+        }
+        if(strncmp(blocked_host, prepend_www_str, read-1) == 0)
+        {
+            free(prepend_www_str);
+            free(blocked_host);
+            return FBDN;
+        }
+        if(strncmp(blocked_host, ip_addr, read-1) == 0)
+        {
+            free(prepend_www_str);
+            free(blocked_host);
+            return FBDN;
+        }
+    }
+    
+    free(prepend_www_str);
+    free(blocked_host);
+    return  0;
+    
+}
