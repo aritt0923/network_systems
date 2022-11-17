@@ -48,6 +48,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
     int cache_flag = 1;
     if (params->dynamic)
     {
+        printf("dynamic\n");
         cache_flag = 0;
     }
     while (bytes_recvd > 0)
@@ -55,7 +56,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
         sem_wait(socket_sem);
         bytes_recvd = recv(serv_sockfd, message_buf, MAX_MSG_SZ, 0);
         sem_post(socket_sem);
-
+    
         if (first_pass)
         { // this packet has the header
             if ((header_size = parse_header(message_buf, file)) == -1)
@@ -67,6 +68,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
             }
             if (header_size == -2)
             { // error from server, just forward it to the client
+                fprintf(stderr,"something weird with response\n");
                 cache_flag = 0;
             }
 
@@ -92,7 +94,6 @@ int fetch_remote(hash_table *cache, const char *client_req,
                     cache_flag = 0;
                     continue;
                 }
-
                 add_cache_entry_non_block(cache, file);
                 fprintf(cache_file, "%.*s", MAX_MSG_SZ - header_size, &message_buf[header_size]);
             }
@@ -102,7 +103,6 @@ int fetch_remote(hash_table *cache, const char *client_req,
         else
         {
             // else fetch_remote\n");
-
             if (cache_flag)
             {
                 fprintf(cache_file, "%.*s", MAX_MSG_SZ, message_buf);
@@ -146,8 +146,12 @@ int parse_header(char *header_packet, struct cache_node *file)
     //#define PARSE_HEADER_PED_
     if ((strncmp(&header_packet[9], "200 OK", strlen("200 OK")) != 0))
     {
-        // fprintf(stderr, "Error from server\n");
-        return -2;
+        if((strncmp(&header_packet[9], "304 Not Modified", strlen("304 Not Modified")) != 0))
+        {
+            fprintf(stderr, "Error from server\nHeader: %s:::\n", header_packet);
+            return -2;
+        }
+
     }
     ptrdiff_t header_size;
     char *header_end = strstr(header_packet, "\r\n\r\n");
@@ -207,7 +211,7 @@ int parse_header(char *header_packet, struct cache_node *file)
     free(header_buf);
     return header_size;
 #ifdef FUN_TRACE
-    printf("exited fetch_remote\n");
+    printf("exited parse_header\n");
 #endif // FUN_TRACE
 }
 

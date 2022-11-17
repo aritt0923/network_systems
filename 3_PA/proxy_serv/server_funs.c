@@ -89,6 +89,7 @@ int parse_req(const char *client_req, req_params *params)
     if (strncmp(client_req, "GET ", 4) != 0)
     {
         fprintf(stderr, "METHOD NOT ALLOWED in parse_req\n");
+        fprintf(stderr, "CLIENT REQ:::%s", client_req);
         return BAD_REQ;
     }
     memcpy(params->req_type, "GET", strlen("GET"));
@@ -340,6 +341,7 @@ int send_file(FILE *fp, char *header, int sockfd, sem_t *socket_sem)
         sem_post(socket_sem);
         bzero(data, KILO);
     }
+    
     printf("Thread %ld sent %s\n", pthread_self(), header);
     return 0;
 }
@@ -494,3 +496,5 @@ int check_dynamic(char *url)
     }
     return 1;
 }
+
+
