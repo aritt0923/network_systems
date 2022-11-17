@@ -26,6 +26,7 @@ int free_hash_table(hash_table *cache)
         destroy_cache_ll(cache->arr[i]);
     }
     free(cache->arr);
+    free(cache);
     return 0;
 }
 
@@ -83,7 +84,7 @@ int init_cache_ll_head(cache_ll_head *head_node)
     head_node->rwlock = calloc_wrap(1, sizeof(pthread_rwlock_t));
     pthread_rwlockattr_t attr;
     pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-    pthread_rwlock_init(head_node->rwlock, NULL);
+    pthread_rwlock_init(head_node->rwlock, &attr);
     pthread_rwlockattr_destroy(&attr);
 
     return 0;
@@ -95,12 +96,8 @@ int destroy_cache_ll(cache_ll_head *head_node)
     struct cache_node *next_node = NULL;
     if (curr_node == NULL)
     {
-        int res;
-        if ((res = pthread_rwlock_destroy(head_node->rwlock)) != 0)
-        {
-            fprintf(stderr, "Error destroying rwlock in destroy_cache_ll()\n");
-        }
-        return res;
+        free_cache_ll_head(head_node);
+        return 0;
     }
 
     while (curr_node->next)
@@ -146,6 +143,34 @@ int add_cache_entry(hash_table *cache, struct cache_node *file)
     return 0;
 }
 
+int add_cache_entry_non_block(hash_table *cache, struct cache_node *file)
+{
+    cache_ll_head *head_node;
+    head_node = cache->arr[cache_hash(file->md5_hash, cache->buckets)];
+
+    struct cache_node *curr_node = head_node->next;
+    if (curr_node == NULL)
+    {
+        head_node->next = file;
+        return 0;
+    }
+    while (curr_node->next)
+    {
+        if (strncmp(file->md5_hash, curr_node->md5_hash, EVP_MAX_MD_SIZE) == 0)
+        {
+            return 0;
+        }
+        curr_node = curr_node->next;
+    }
+    if (strncmp(file->md5_hash, curr_node->md5_hash, EVP_MAX_MD_SIZE) == 0)
+    {
+        return 0;
+    }
+    curr_node->next = file;
+    return 0;
+}
+
+ 
 struct cache_node *get_cache_entry(hash_table *cache, char *md5_hash)
 {
     int bucket;
@@ -174,7 +199,8 @@ struct cache_node *get_cache_entry(hash_table *cache, char *md5_hash)
 
 unsigned long cache_hash(char *md5_hash, int buckets)
 {
-    return (djb2((unsigned char *)md5_hash) % buckets);
+    int bucket = djb2((unsigned char *)md5_hash) % buckets;
+    return bucket;
 }
 
 int get_ll_rdlock(hash_table *cache, struct cache_node *file)
@@ -203,11 +229,11 @@ int release_ll_rwlock(hash_table *cache, struct cache_node *file)
 //djb2
 unsigned long djb2(unsigned char *str)
 {
+    //printf("djb2\n");
     unsigned long hash = 5381;
     int c;
 
     while ((c = *str++))
         hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-
     return hash;
 }

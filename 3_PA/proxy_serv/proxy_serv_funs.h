@@ -95,7 +95,7 @@ int get_filetype(char * filename, char* filetype_buf);
  */
 int build_header(req_params *params, struct cache_node *file, char *header_buf);
 
-
+ 
 /* Source: server_funs.c
  * Sends file pointed to by FP to client
  * Catches:

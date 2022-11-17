@@ -26,33 +26,30 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
     int res = 0;
     if ((res = parse_req(client_req, params)) != 0)
     { // exit point for any errors returned by parse_req
+
         fprintf(stderr, "error in parse_req\n");
         send_error(res, params, sockfd, socket_sem);
+        free_params(params);
         return res;
     }
     char *md5_hash = calloc_wrap(EVP_MAX_MD_SIZE, sizeof(char));
-    char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
-    
-    memcpy(str_to_hash, params->hostname, strlen(params->hostname));
-    memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
-    md5_str(str_to_hash, md5_hash);
-    
-    free(str_to_hash);
-    
-    
+    get_md5_str(md5_hash, params);
+
     struct cache_node *file = get_cache_entry(cache, md5_hash);
     free(md5_hash);
-    
+
     if ((res = check_ttl(cache, file, cache->ttl_seconds)) < 0)
     {
+        free_params(params);
+
         return -1;
     }
-    
-    
+
     if (res == 0)
     { // ttl is not expired
-    
-        return (send_file_from_cache(cache, file, params, sockfd, socket_sem));
+        res = send_file_from_cache(cache, file, params, sockfd, socket_sem);
+        free_params(params);
+        return res;
     }
     // need to fetch remote
     res = fetch_remote(cache, client_req, params, file, sockfd, socket_sem);
@@ -61,9 +58,10 @@ int handle_get(hash_table *cache, const char *client_req, int sockfd, sem_t *soc
         fprintf(stderr, "error in connect_remote\n");
         printf("res = %d\n", res);
         send_error(res, params, sockfd, socket_sem);
+        free_params(params);
+
         return res;
     }
-
     free_params(params);
     return 0;
 }
@@ -114,7 +112,7 @@ int parse_req(const char *client_req, req_params *params)
         fprintf(stderr, "BAD REQUEST in parse_req\n");
         return BAD_REQ;
     }
-    if((url_end_idx - url_start_idx) > MAX_URL_LEN)
+    if ((url_end_idx - url_start_idx) > MAX_URL_LEN)
     {
         fprintf(stderr, "URL too long\n");
         return BAD_REQ;
@@ -144,7 +142,7 @@ int parse_req(const char *client_req, req_params *params)
     }
     else
     {
-        strncpy(params->filepath, &client_req[url_start_idx], url_end_idx-filepath_start_idx);
+        strncpy(params->filepath, &client_req[url_start_idx], url_end_idx - filepath_start_idx);
     }
 #ifdef PRINT_PARAMS
     printf("params->filepath: %s\n\n", params->filepath);
@@ -171,7 +169,7 @@ int parse_req(const char *client_req, req_params *params)
             memcpy(port_num_url, port_num_tmp, strlen(port_num_tmp));
         }
     }
-    
+
     params->dynamic = check_dynamic(params->url);
 
     // get http ver
@@ -209,6 +207,8 @@ int parse_req(const char *client_req, req_params *params)
             tmp_str = &token[strlen("Host: ")];
             if (strlen(tmp_str) > MAX_HOSTNAME_LEN)
             {
+                free(client_req_cp);
+                free(hostname_tmp);
                 fprintf(stderr, "Hostname too big\n");
                 return -1;
             }
@@ -219,9 +219,12 @@ int parse_req(const char *client_req, req_params *params)
     if (strlen(hostname_tmp) == 0)
     {
         fprintf(stderr, "No Host: field\n");
+        free(hostname_tmp);
+        free(client_req_cp);
+        
         return BAD_REQ;
     }
-
+    free(client_req_cp);
     port_num_tmp = strrchr(hostname_tmp, ':');
     char port_num_hn[5];
     memset(port_num_hn, '\0', 5);
@@ -263,6 +266,7 @@ int parse_req(const char *client_req, req_params *params)
         { // got port_num from both, need to compare
             if (strncmp(port_num_hn, port_num_url, 4) != 0)
             { // dont match
+                free(hostname_tmp);
                 return BAD_REQ;
             }
             memcpy(params->port_num, port_num_hn, strlen(port_num_hn));
@@ -276,6 +280,7 @@ int parse_req(const char *client_req, req_params *params)
 #ifdef PRINT_PARAMS
     printf("params->port_num: %s\n\n", params->port_num);
 #endif // PRINT_PARAMS
+    free(hostname_tmp);
     return 0;
 }
 
@@ -300,13 +305,13 @@ int build_header(req_params *params, struct cache_node *file, char *header_buf)
     memcpy(&header_buf[strlen(header_buf)], "Content-Type: ", strlen("Content-Type: "));
     memcpy(&header_buf[strlen(header_buf)], file->filetype, strlen(file->filetype));
     memcpy(&header_buf[strlen(header_buf)], "\r\n", strlen("\r\n"));
-    
-    int filesize_str_len = snprintf(NULL, 0, "%d", file->filesize);
+
+    int filesize_str_len = snprintf(NULL, 0, "%d", file->filesize) + 1;
     // alloc the string
     char *filesize_buf = calloc(filesize_str_len, sizeof(char));
     // copy it over
     sprintf(filesize_buf, "%d", file->filesize);
-    
+
     memcpy(&header_buf[strlen(header_buf)], "Content-Length: ", strlen("Content-Length: "));
     memcpy(&header_buf[strlen(header_buf)], filesize_buf, strlen(filesize_buf));
     memcpy(&header_buf[strlen(header_buf)], "\r\n\r\n", strlen("\r\n\r\n"));
@@ -460,36 +465,32 @@ double diff_timespec(const struct timespec *time1, const struct timespec *time0)
     return (time1->tv_sec - time0->tv_sec) + (time1->tv_nsec - time0->tv_nsec) / 1000000000.0;
 }
 
-
 int send_file_from_cache(hash_table *cache, struct cache_node *file, req_params *params, int sockfd, sem_t *socket_sem)
 {
     get_ll_rdlock(cache, file);
     char *header_buf = calloc_wrap(KILO, sizeof(char));
     build_header(params, file, header_buf);
-    
-    char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
-    get_full_filepath(filepath, file);
-    FILE * file_ptr = fopen(filepath, "rb");
-    free(filepath);
-    if (file_ptr ==NULL) 
+
+    FILE *file_ptr = open_file_from_cache_node_rd(file);
+
+    if (file_ptr == NULL)
     {
         return NOTFOUND;
     }
     send_file(file_ptr, header_buf, sockfd, socket_sem);
-    
+
     free(header_buf);
+    fclose(file_ptr);
     release_ll_rwlock(cache, file);
     return 0;
 }
 
-
-int check_dynamic(char * url)
+int check_dynamic(char *url)
 {
-    char * query = strstr(url, "?");
-    if(query == NULL)
+    char *query = strstr(url, "?");
+    if (query == NULL)
     {
         return 0;
     }
     return 1;
 }
-

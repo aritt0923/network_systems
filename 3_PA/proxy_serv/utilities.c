@@ -79,7 +79,7 @@ int md5_str(char * url, char * hash_res_buf)
 // https://beej.us/guide/bgnet/examples/client.c
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa) 
-{
+{ 
     if (sa->sa_family == AF_INET)
     {
         return &(((struct sockaddr_in*)sa)->sin_addr);
@@ -87,6 +87,39 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+FILE * open_file_from_cache_node_wr(struct cache_node *file)
+{
+    FILE * cache_file = NULL;
+    char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
+    get_full_filepath(filepath, file);
+    cache_file = fopen(filepath, "wb+");
+    free(filepath);
+    return cache_file;
+}
+
+
+FILE * open_file_from_cache_node_rd(struct cache_node *file)
+{
+    FILE * cache_file = NULL;
+    char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
+    get_full_filepath(filepath, file);
+    cache_file = fopen(filepath, "rb");
+    free(filepath);
+    return cache_file;
+}
+
+
+int get_md5_str(char *md5_str_buf, req_params *params)
+{
+    char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
+    
+    memcpy(str_to_hash, params->hostname, strlen(params->hostname));
+    memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
+    md5_str(str_to_hash, md5_str_buf);
+    
+    free(str_to_hash);
+    return 0;
+}
 
 int init_params(req_params *params)
 {
@@ -110,5 +143,6 @@ int free_params(req_params *params)
     free(params->hostname);
     free(params->filepath);
     free(params->query);
+    free(params);
     return 0;
 }

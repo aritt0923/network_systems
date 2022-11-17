@@ -4,11 +4,20 @@
 #include <wrappers.h>
 #include <cache.h>
 
-#define PEDANTIC
+//#define PEDANTIC
+//#define FUN_TRACE
 
+/*
+ * allocs:
+ *      char * message_buf
+ */
 int fetch_remote(hash_table *cache, const char *client_req,
                  req_params *params, struct cache_node *file, int client_sockfd, sem_t *socket_sem)
 {
+
+#ifdef FUN_TRACE
+    printf("entered fetch_remote\n");
+#endif // FUN_TRACE
     int res;
     int serv_sockfd;
     if ((res = connect_remote(&serv_sockfd, params)) != 0)
@@ -17,13 +26,9 @@ int fetch_remote(hash_table *cache, const char *client_req,
     }
 
     if (file == NULL)
-    {
+    { // no existing entry, need to prepare a cache node
         file = get_cache_node();
-        char *str_to_hash = calloc_wrap(MAX_URL_LEN + MAX_HOSTNAME_LEN, sizeof(char));
-        memcpy(str_to_hash, params->hostname, strlen(params->hostname));
-        memcpy(&str_to_hash[strlen(params->hostname)], params->filepath, strlen(params->filepath));
-        md5_str(str_to_hash, file->md5_hash);
-        free(str_to_hash);
+        get_md5_str(file->md5_hash, params);
     }
 
     // send client message
@@ -41,7 +46,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
     int header_size = 0;
     int bytes_rem;
     int cache_flag = 1;
-    if(params->dynamic)
+    if (params->dynamic)
     {
         cache_flag = 0;
     }
@@ -52,36 +57,44 @@ int fetch_remote(hash_table *cache, const char *client_req,
         sem_post(socket_sem);
 
         if (first_pass)
-        {
+        { // this packet has the header
             if ((header_size = parse_header(message_buf, file)) == -1)
-            {
+            { // malformed response
+                free(message_buf);
+                close(serv_sockfd);
+
                 return BAD_RESP;
             }
             if (header_size == -2)
-            {
+            { // error from server, just forward it to the client
                 cache_flag = 0;
             }
+
             bytes_rem = file->filesize;
             bytes_rem -= (bytes_recvd - header_size);
             first_pass = 0;
 
             if (cache_flag)
-            {
-                add_cache_entry(cache, file);
-                
+            { //
                 get_ll_wlock(cache, file);
+
                 // get a file pointer to the file we're looking for
-                char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
-                get_full_filepath(filepath, file);
-                cache_file = fopen(filepath, "w+");
-                free(filepath);
+                cache_file = open_file_from_cache_node_wr(file);
                 if (cache_file == NULL)
-                {
-                    release_ll_rwlock(cache, file);  
+                { // couldn't open a file to cache this
+                    printf("cache flag was null\n");
+                    release_ll_rwlock(cache, file);
+                    struct cache_node *tmp_cache_node;
+                    if ((tmp_cache_node = get_cache_entry(cache, file->md5_hash)) == NULL)
+                    { // this node has not been added to the cache, delete it
+                        free_cache_node(file);
+                    }
                     cache_flag = 0;
                     continue;
                 }
-                fprintf(cache_file, "%s", &message_buf[header_size]);
+
+                add_cache_entry_non_block(cache, file);
+                fprintf(cache_file, "%.*s", MAX_MSG_SZ - header_size, &message_buf[header_size]);
             }
 
             // printf("%s", &message_buf[header_size]);
@@ -92,7 +105,7 @@ int fetch_remote(hash_table *cache, const char *client_req,
 
             if (cache_flag)
             {
-                fprintf(cache_file, "%s", message_buf);
+                fprintf(cache_file, "%.*s", MAX_MSG_SZ, message_buf);
             }
             bytes_rem -= bytes_recvd;
         }
@@ -116,20 +129,24 @@ int fetch_remote(hash_table *cache, const char *client_req,
     {
         release_ll_rwlock(cache, file);
     }
-    else
-    {
-        free_cache_node(file);
-    }
+    close(serv_sockfd);
+#ifdef FUN_TRACE
+    printf("exited fetch_remote\n");
+#endif // FUN_TRACE
+free(message_buf);  
     return 0;
 }
 
 int parse_header(char *header_packet, struct cache_node *file)
 {
+#ifdef FUN_TRACE
+    printf("entered parse_header\n");
+#endif // FUN_TRACE
     //#define PARSE_HEADER_DB_
     //#define PARSE_HEADER_PED_
     if ((strncmp(&header_packet[9], "200 OK", strlen("200 OK")) != 0))
     {
-        //fprintf(stderr, "Error from server\n");
+        // fprintf(stderr, "Error from server\n");
         return -2;
     }
     ptrdiff_t header_size;
@@ -189,28 +206,16 @@ int parse_header(char *header_packet, struct cache_node *file)
     free(filesize_str);
     free(header_buf);
     return header_size;
+#ifdef FUN_TRACE
+    printf("exited fetch_remote\n");
+#endif // FUN_TRACE
 }
-
-/*
-FILE *create_struct cache_node(struct cache_node *file)
-{
-    char *filepath = calloc_wrap(EVP_MAX_MD_SIZE + strlen("./cache/"), sizeof(char));
-    memcpy(filepath, "./cache/", strlen("./cache/"));
-    memcpy(&filepath[strlen(filepath)], file->md5_hash, EVP_MAX_MD_SIZE);
-    FILE *fPtr;
-
-    fPtr = fopen("cache/%s", "w");
-
-    if (fPtr == NULL)
-    {
-        printf("Unable to create file.\n");
-        exit(EXIT_FAILURE);
-    }
-}
-*/
 
 int connect_remote(int *serv_sockfd, req_params *params)
 {
+#ifdef FUN_TRACE
+    printf("entered connect_remote\n");
+#endif // FUN_TRACE
     struct addrinfo hints;
     struct addrinfo *servinfo; // will point to the results
 
@@ -267,57 +272,70 @@ int connect_remote(int *serv_sockfd, req_params *params)
 
     printf("client: connecting to %s\n", s);
     int res;
-    if((res = check_blocklist(params->hostname, s)) != 0)
+    if ((res = check_blocklist(params->hostname, s)) != 0)
     {
         return res;
     }
 
     freeaddrinfo(servinfo);
+#ifdef FUN_TRACE
+    printf("exited connect_remote\n");
+#endif // FUN_TRACE
     return 0;
 }
 
-int check_blocklist(char *hostname, char * ip_addr)
+int check_blocklist(char *hostname, char *ip_addr)
 {
-    FILE * blocklist;
+#ifdef FUN_TRACE
+    printf("entered check_blocklist\n");
+#endif // FUN_TRACE
+    FILE *blocklist;
     blocklist = fopen(".blocklist", "r");
     if (blocklist == NULL)
     {
         return 0;
     }
-    char * blocked_host = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
+    char *blocked_host = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
     size_t len = MAX_HOSTNAME_LEN;
     ssize_t read;
-    
-    char * prepend_www_str = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
-    
+
+    char *prepend_www_str = calloc_wrap(MAX_HOSTNAME_LEN, sizeof(char));
+
     memcpy(prepend_www_str, "www.", strlen("www."));
-    
+
     memcpy(&prepend_www_str[strlen("www.")], hostname, strlen(hostname));
-  
-    
-    while ((read = getline(&blocked_host, &len, blocklist)) != -1) {
-        if(strncmp(blocked_host, hostname, read-1) == 0)
+
+    while ((read = getline(&blocked_host, &len, blocklist)) != -1)
+    {
+        if (strncmp(blocked_host, hostname, read - 1) == 0)
         {
+            fclose(blocklist);
+
             free(prepend_www_str);
             free(blocked_host);
             return FBDN;
         }
-        if(strncmp(blocked_host, prepend_www_str, read-1) == 0)
+        if (strncmp(blocked_host, prepend_www_str, read - 1) == 0)
         {
+            fclose(blocklist);
+
             free(prepend_www_str);
             free(blocked_host);
             return FBDN;
         }
-        if(strncmp(blocked_host, ip_addr, read-1) == 0)
+        if (strncmp(blocked_host, ip_addr, read - 1) == 0)
         {
+            fclose(blocklist);
             free(prepend_www_str);
             free(blocked_host);
             return FBDN;
         }
     }
-    
+    fclose(blocklist);
     free(prepend_www_str);
     free(blocked_host);
-    return  0;
-    
+#ifdef FUN_TRACE
+    printf("exited check_blocklist\n");
+#endif // FUN_TRACE
+    return 0;
 }

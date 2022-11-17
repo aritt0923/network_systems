@@ -45,6 +45,14 @@ int md5_str(char * url, char * hash_res_buf);
 
 void *get_in_addr(struct sockaddr *sa);
 
+FILE * open_file_from_cache_node_wr(struct cache_node *file);
+
+
+FILE * open_file_from_cache_node_rd(struct cache_node *file);
+ 
+int get_md5_str(char *md5_str_buf, req_params *params);
+
+
 
 /* Source: utilities.c
  * Callocs buffers and initializes data

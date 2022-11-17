@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
     {
         mkdir("./cache", 0777);
     }
-    
+
     signal(SIGINT, sig_handler);
     int socket_desc;
     struct sockaddr_in server;
@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     // puts("bind done");
-
+ 
     listen_wrap(socket_desc, 256);
 
     sem_t accept_sem;
@@ -105,6 +105,7 @@ int main(int argc, char *argv[])
     pthread_join(socket_closer_thread, NULL);
     join_threads(num_threads, thread_id_arr);
     free_hash_table(cache);
+    close(socket_desc);
     return 0;
 }
 

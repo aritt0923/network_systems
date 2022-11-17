@@ -1,6 +1,6 @@
 CC=gcc
 OBJS = proxy_serv.o wrappers.o server_funs.o proxy_funs.o utilities.o cache.o
-CFLAGS=-I. -Wall -Wextra
+CFLAGS=-I. -Wall -Wextra -g -O0
 DEPS = proxy_serv_funs.h status_codes.h wrappers.h utilities.h cache.h
 LDFLAGS = -lpthread -lcrypto
 

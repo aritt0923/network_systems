@@ -49,12 +49,14 @@ struct cache_node * get_cache_node();
  */
 int init_cache_node(struct cache_node *file);
 
-
+ 
 int init_cache_ll_head(cache_ll_head *head_node);
 
 int destroy_cache_ll(cache_ll_head *head_node);
 
 int add_cache_entry(hash_table *cache, struct cache_node *file);
+int add_cache_entry_non_block(hash_table *cache, struct cache_node *file);
+
 
 struct cache_node *get_cache_entry(hash_table *cache, char * md5_hash);
 
