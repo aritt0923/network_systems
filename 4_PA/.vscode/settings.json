@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.ejs": "html",
+        "*.txt": "plaintext",
+        "client_serv_common.h": "c"
+    }
+}

@@ -12,13 +12,24 @@ int main(int argc, char *argv[])
     int cmd;
     int num_cmds;
     int num_up;
-    
+
     if ((cmd = parse_args(argc, argv, &cmd_lst, &num_cmds)) < 0)
     {
         fprintf(stderr, "error parsing args\n");
         exit(EXIT_FAILURE);
     }
 
+    num_up = get_num_servs(df_serv_arr);
+    for (int i = 0; i < NUM_SERVERS; i++)
+    {
+        // connect_remote(&df_serv_arr[i]);
+        if (!df_serv_arr[i].available)
+        {
+            fprintf(stderr, cmd_lst[0]->filename_hr);
+            fprintf(stderr, " put failed.");
+            return -1;
+        }
+    }
     switch (cmd)
     {
 
@@ -28,23 +39,28 @@ int main(int argc, char *argv[])
         handle_ls_dfc(df_serv_arr, cmd_lst[0]);
         break;
     case GET:
+        if (!df_serv_arr[0].available && !df_serv_arr[2].available)
+        {
+            if (!df_serv_arr[0].available && !df_serv_arr[2].available)
+            {
+                fprintf(stderr, cmd_lst[0]->filename_hr);
+                fprintf(stderr, " is incomplete.");
+                return -1;
+            }
+        }
         for (int i = 0; i < num_cmds; i++)
         {
-            printf("handle_get\n");
             handle_get_dfc(df_serv_arr, cmd_lst[i]);
         }
         break;
     case PUT:
-        num_up = get_num_servs(df_serv_arr);
-        for (int i = 0; i < NUM_SERVERS; i++)
+
+        // connect_remote(&df_serv_arr[i]);
+        if (num_up < NUM_SERVERS)
         {
-            // connect_remote(&df_serv_arr[i]);
-            if (!df_serv_arr[i].available)
-            {
-                fprintf(stderr, cmd_lst[0]->filename_hr);
-                fprintf(stderr, " put failed.");
-                return -1;
-            }
+            fprintf(stderr, cmd_lst[0]->filename_hr);
+            fprintf(stderr, " put failed.");
+            return -1;
         }
         for (int i = 0; i < num_cmds; i++)
         {
@@ -58,7 +74,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "invalid cmd\n");
         break;
     }
-    
+
     for (int i = 0; i < NUM_SERVERS; i++)
     {
         printf("closing sockets\n");
@@ -112,15 +128,121 @@ int handle_ls_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd)
 
 int handle_get_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd)
 {
-
-    char *cmd_str = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
-    serv_cmd_to_str(cmd, cmd_str);
+    FILE *fp = fopen(cmd->filename_hr, "wb");
+    fclose(fp);
+    fp = fopen(cmd->filename_hr, "a");
+    
+    int servers_to_use[2];
+    if (df_serv_arr[0].available && df_serv_arr[2].available)
+    {
+        servers_to_use[0] = 0;
+        servers_to_use[1] = 2;
+    }
+    else
+    {
+        servers_to_use[0] = 1;
+        servers_to_use[1] = 3;
+    }
+    md5_str(cmd->filename_hr, cmd->filename_md5);
+    
+    cmd->req_tmstmp = '0';
+    get_chunk_from_server(df_serv_arr[servers_to_use[0]], cmd, fp);
+    cmd->req_tmstmp = '1';
+    get_chunk_from_server(df_serv_arr[servers_to_use[1]], cmd, fp);
+    
+    fclose(fp);
 
     return 0;
 }
 
-int get_chunk_from_serv(df_serv_info df_serv, df_serv_cmd *cmd)
+int get_chunk_from_server(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp)
 {
+
+    char *cmd_str = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
+    serv_cmd_to_str(cmd, cmd_str);
+    //printf("%s\n", cmd_str );
+
+    send(df_serv.sockfd, cmd_str, MAX_CMD_STR_SIZE, 0);
+
+    char *header = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
+    char *header_cpy = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
+
+    recv(df_serv.sockfd, header, MAX_CMD_STR_SIZE, 0);
+    printf("HEADER:::%s\n",header);
+    memcpy(header_cpy, header, strlen(header));
+    
+    str_to_serv_cmd(cmd, header_cpy);
+    
+    get_body_from_serv(df_serv, cmd, fp);
+
+    while (1)
+    {
+        memset(header, '\0', MAX_CMD_STR_SIZE);
+        memset(header_cpy, '\0', MAX_CMD_STR_SIZE);
+        memset(cmd->cmd, '\0', MAX_CMD_LEN);
+        
+        recv(df_serv.sockfd, header, MAX_CMD_STR_SIZE, 0);
+        printf("%s\n",header);
+        
+        memcpy(header_cpy, header, strlen(header));
+        str_to_serv_cmd(cmd, header);
+
+        if (strncmp(cmd->cmd, "get", strlen("get")) == 0)
+        {
+            get_body_from_serv(df_serv, cmd, fp);
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+int get_body_from_serv(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp)
+{
+    
+    char *message_buf = calloc_wrap(MAX_MSG_SZ, sizeof(char));
+
+    int chunk_size = 0;
+    str2int(&chunk_size, cmd->chunk_size);
+    
+    int offset;
+    str2int(&offset, cmd->offset);
+    printf("offset: %d\n", offset);
+    fseek(fp, offset, 0);
+
+    int bytes_remaining = chunk_size;
+    int bytes_recvd = 1;
+    int limit = chunk_size;
+    int break_flag = 0;
+    if (chunk_size > MAX_MSG_SZ)
+    {
+        limit = MAX_MSG_SZ;
+    }
+    printf("chunk_size: %d\n", chunk_size);
+    while (bytes_recvd > 0)
+    {
+        printf("attempting recv\n");
+        if (bytes_remaining < limit)
+        {
+            limit = bytes_remaining;
+            break_flag = 1;
+        }
+        memset(message_buf, '\0', MAX_MSG_SZ);
+        bytes_recvd = recv(df_serv.sockfd, message_buf, limit, 0);
+        printf("%s\n",message_buf);
+        printf("bytes_recvd %d\n", bytes_recvd);
+        bytes_remaining -= bytes_recvd;
+
+        fprintf(fp, message_buf);
+        int filesize = get_file_size(fp);
+        if (break_flag)
+        {
+            break;
+        }
+    }
     return 0;
 }
 

@@ -62,7 +62,11 @@ int handle_get_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd);
  * recieves file chunk and writes to file
  * @param df_serv_arr array of df_serv_info structs
  */
-int get_chunk_from_serv(df_serv_info df_serv, df_serv_cmd *cmd);
+int get_chunk_from_server(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp);
+
+int get_body_from_serv(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp);
+
+
 
 /**
  * Requires that all four servers be up
