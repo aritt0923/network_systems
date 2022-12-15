@@ -35,6 +35,7 @@ int main(int argc, char *argv[])
     case PUT:
         for (int i = 0; i < num_cmds; i++)
         {
+            printf("calling handle_put\n");
             handle_put_dfc(df_serv_arr, cmd_lst[i]);
         }
         break;
@@ -43,7 +44,13 @@ int main(int argc, char *argv[])
         fprintf(stderr, "invalid cmd\n");
         break;
     }
-
+    for (int i = 0; i < NUM_SERVERS; i++)
+    {
+        if(df_serv_arr[i].available)
+        {
+            close(df_serv_arr[i].sockfd);
+        }
+    }
     return 0;
 }
 
@@ -56,7 +63,6 @@ int get_num_servs(df_serv_info *df_serv_arr)
     for (int i = 0; i < NUM_SERVERS; i++)
     {
         int res;
-        int serv_sockfd;
         if ((res = connect_remote(&df_serv_arr[i])) != 0)
         {
             df_serv_arr[i].available = 0;
@@ -64,6 +70,7 @@ int get_num_servs(df_serv_info *df_serv_arr)
         else
         {
             df_serv_arr[i].available = 1;
+            enable_keepalive(df_serv_arr[i].sockfd);
         }
         sum += df_serv_arr[i].available;
     }
@@ -103,6 +110,18 @@ int get_chunk_from_serv(df_serv_info df_serv, df_serv_cmd *cmd)
 
 int handle_put_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd)
 {
+    
+    int num_up = get_num_servs(df_serv_arr);
+    for (int i = 0; i < NUM_SERVERS; i++)
+    {
+        // connect_remote(&df_serv_arr[i]);
+        if (!df_serv_arr[i].available)
+        {
+            fprintf(stderr, cmd->filename_hr);
+            fprintf(stderr, " put failed.");
+            return -1;
+        }
+    }
     md5_str(cmd->filename_hr, cmd->filename_md5);
     int bucket = file_cabinet_hash(cmd->filename_md5, NUM_SERVERS);
 
@@ -176,37 +195,34 @@ int send_chunk_to_serv(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp, int chu
     char * cmd_str = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
     serv_cmd_to_str(cmd, cmd_str);
     
-    printf("CMD_STR:\n%s\n", cmd_str);
+    send(df_serv.sockfd, cmd_str, strlen(cmd_str), 0);
     
     fseek(fp, offset, 0);
 
     int limit = chunk_size;
-    if(chunk_size > KILO)
+    if(chunk_size > MAX_MSG_SZ)
     {
-        limit = KILO;
+        limit = MAX_MSG_SZ;
     }
-    char *data = calloc_wrap(KILO+1, sizeof(char));
+    char *data = calloc_wrap(MAX_MSG_SZ+1, sizeof(char));
     
     int num_read = 0;
     int total_read = 0;
     int left_to_read = chunk_size;
     int break_flag = 0;
     
-    
     while (1)
-    {
+    {        
         if(left_to_read < limit)
         {
             limit = left_to_read;
             break_flag = 1;
         }
-        
         num_read = fread(data, sizeof(char), limit, fp);
         left_to_read -= num_read;
-        //send_wrap(sockfd, data, sizeof(data), 0);
-        //bzero(&data[limit], KILO);
-        printf("%s", data);
-        memset(data, '\0', KILO+1);
+        send(df_serv.sockfd, data, num_read, 0);
+        //send here
+        memset(data, '\0', MAX_MSG_SZ+1);
         if(break_flag)
         {
             break;
