@@ -11,6 +11,8 @@ int main(int argc, char *argv[])
 
     int cmd;
     int num_cmds;
+    int num_up;
+    
     if ((cmd = parse_args(argc, argv, &cmd_lst, &num_cmds)) < 0)
     {
         fprintf(stderr, "error parsing args\n");
@@ -33,20 +35,34 @@ int main(int argc, char *argv[])
         }
         break;
     case PUT:
+        num_up = get_num_servs(df_serv_arr);
+        for (int i = 0; i < NUM_SERVERS; i++)
+        {
+            // connect_remote(&df_serv_arr[i]);
+            if (!df_serv_arr[i].available)
+            {
+                fprintf(stderr, cmd_lst[0]->filename_hr);
+                fprintf(stderr, " put failed.");
+                return -1;
+            }
+        }
         for (int i = 0; i < num_cmds; i++)
         {
             printf("calling handle_put\n");
             handle_put_dfc(df_serv_arr, cmd_lst[i]);
         }
+        printf("back\n");
         break;
 
     default:
         fprintf(stderr, "invalid cmd\n");
         break;
     }
+    
     for (int i = 0; i < NUM_SERVERS; i++)
     {
-        if(df_serv_arr[i].available)
+        printf("closing sockets\n");
+        if (df_serv_arr[i].available)
         {
             close(df_serv_arr[i].sockfd);
         }
@@ -110,18 +126,6 @@ int get_chunk_from_serv(df_serv_info df_serv, df_serv_cmd *cmd)
 
 int handle_put_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd)
 {
-    
-    int num_up = get_num_servs(df_serv_arr);
-    for (int i = 0; i < NUM_SERVERS; i++)
-    {
-        // connect_remote(&df_serv_arr[i]);
-        if (!df_serv_arr[i].available)
-        {
-            fprintf(stderr, cmd->filename_hr);
-            fprintf(stderr, " put failed.");
-            return -1;
-        }
-    }
     md5_str(cmd->filename_hr, cmd->filename_md5);
     int bucket = file_cabinet_hash(cmd->filename_md5, NUM_SERVERS);
 
@@ -134,30 +138,29 @@ int handle_put_dfc(df_serv_info *df_serv_arr, df_serv_cmd *cmd)
     memcpy(&tmp_str[strlen(tmp_str)], timestamp_buf, strlen(timestamp_buf));
     md5_str(tmp_str, cmd->filename_tmstmp_md5);
 
-    //free(timestamp_buf);
+    // free(timestamp_buf);
 
     FILE *fp = NULL;
     fp = fopen(cmd->filename_hr, "rb");
-    
+
     if (fp == NULL)
     {
         fprintf(stderr, "could not open file\n");
         return 1;
     }
-    
-    
+
     int distro[8];
     get_distro(bucket, distro);
-    
+
     int distro_idx = 0;
-    for(int i = 0; i < NUM_SERVERS; i++)
+    for (int i = 0; i < NUM_SERVERS; i++)
     {
         send_chunk_to_serv(df_serv_arr[i], cmd, fp, distro[distro_idx]);
         distro_idx++;
         send_chunk_to_serv(df_serv_arr[i], cmd, fp, distro[distro_idx]);
         distro_idx++;
     }
-    
+    fclose(fp);
     return 0;
 }
 
@@ -166,54 +169,54 @@ int send_chunk_to_serv(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp, int chu
     printf("chunk %d, server %s\n", chunk, df_serv.port_no);
     int filesize = get_file_size(fp);
     int chunk_size;
-    if(chunk == 4)
+    if (chunk == 4)
     {
-        chunk_size = filesize/4 + filesize%4;
+        chunk_size = filesize / 4 + filesize % 4;
     }
     else
     {
-        chunk_size = filesize/4;
+        chunk_size = filesize / 4;
     }
     printf("chunk_size: %d\n", chunk_size);
-    
-    unsigned int offset = (filesize/4)*(chunk-1);
+
+    unsigned int offset = (filesize / 4) * (chunk - 1);
     char chunk_str[1];
-    
+
     sprintf(chunk_str, "%d", chunk);
     sprintf(cmd->filesize, "%d", filesize);
     sprintf(cmd->chunk_size, "%d", chunk_size);
     sprintf(cmd->offset, "%d", offset);
-    
+
     memset(cmd->chunk_name, '\0', EVP_MAX_MD_SIZE);
-    
+
     memcpy(cmd->chunk_name, cmd->filename_tmstmp_md5, strlen(cmd->filename_tmstmp_md5));
     memcpy(&cmd->chunk_name[strlen(cmd->chunk_name)], "_", 1);
     memcpy(&cmd->chunk_name[strlen(cmd->chunk_name)], chunk_str, 1);
-    
+
     cmd->chunk = chunk_str[0];
-    
-    char * cmd_str = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
+
+    char *cmd_str = calloc_wrap(MAX_CMD_STR_SIZE, sizeof(char));
     serv_cmd_to_str(cmd, cmd_str);
-    
+
     send(df_serv.sockfd, cmd_str, strlen(cmd_str), 0);
-    
+
     fseek(fp, offset, 0);
 
     int limit = chunk_size;
-    if(chunk_size > MAX_MSG_SZ)
+    if (chunk_size > MAX_MSG_SZ)
     {
         limit = MAX_MSG_SZ;
     }
-    char *data = calloc_wrap(MAX_MSG_SZ+1, sizeof(char));
-    
+    char *data = calloc_wrap(MAX_MSG_SZ + 1, sizeof(char));
+
     int num_read = 0;
     int total_read = 0;
     int left_to_read = chunk_size;
     int break_flag = 0;
-    
+
     while (1)
-    {        
-        if(left_to_read < limit)
+    {
+        if (left_to_read < limit)
         {
             limit = left_to_read;
             break_flag = 1;
@@ -221,14 +224,14 @@ int send_chunk_to_serv(df_serv_info df_serv, df_serv_cmd *cmd, FILE *fp, int chu
         num_read = fread(data, sizeof(char), limit, fp);
         left_to_read -= num_read;
         send(df_serv.sockfd, data, num_read, 0);
-        //send here
-        memset(data, '\0', MAX_MSG_SZ+1);
-        if(break_flag)
+        // send here
+        memset(data, '\0', MAX_MSG_SZ + 1);
+        if (break_flag)
         {
             break;
         }
     }
-    
+
     printf("\n\n");
     return 0;
 }
@@ -420,10 +423,7 @@ int get_distro(int bucket, int *arr)
     int distro_1[8] = {4, 1, 1, 2, 2, 3, 3, 4};
     int distro_2[8] = {3, 4, 4, 1, 1, 2, 2, 3};
     int distro_3[8] = {2, 3, 3, 4, 4, 1, 1, 2};
-    
-    
-    
-    
+
     switch (bucket)
     {
     case 0:
@@ -439,7 +439,6 @@ int get_distro(int bucket, int *arr)
             arr[i] = distro_1[i];
         }
         return 0;
-        
 
     case 2:
         for (int i = 0; i < 8; i++)
@@ -447,7 +446,6 @@ int get_distro(int bucket, int *arr)
             arr[i] = distro_2[i];
         }
         return 0;
-        
 
     case 3:
         for (int i = 0; i < 8; i++)
@@ -455,7 +453,7 @@ int get_distro(int bucket, int *arr)
             arr[i] = distro_3[i];
         }
         return 0;
-        
+
     default:
         fprintf(stderr, "error getting buckets\n");
         return -1;
