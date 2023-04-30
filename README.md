@@ -1,17 +1,29 @@
 # Network Systems
+
 My Network Systems coursework, CU Boulder, Fall 2022
 
-Code is organized by programming assignment (PA). The directories start with the PA number because I'm lazy and I like tab completion. 
+Code is organized by programming assignment (PA). 
 
-PA 1 is a reliable UDP file transfer protocol that includes both server and client. It works, but there are some things I'd like to address if I have time. 
+### PA 1 
 
-First, it's too much code. The client and server share (at a guess) over 500 lines of identical code, all of which should be moved to a third file. 
+Reliable UDP file transfer protocol that includes both server and client.
 
-Second, the program works by reading the binary data from the file into a dynamically allocated array, 
-out of which it copies the data over to a dynamically allocated two-dimensional array, where each row represents a complete UDP packet.
-Put simply, that doesn't make much sense. It was cumbersome to write, and more importantly, it's a terrible use of heap memory. 
-The only advantage to this system is that it makes finding and resending dropped packets really easy. If
-you're writing this program yourself, just read the data from the file into the packets as you send them. Dropped packets can be
-delt with via a function that puts your file offset in the correct place for a given packet. 
+##### Notes
 
+Too much code - only two files were allowed to be submitted for this assignment, a server and a client, so there is a ton of redundant code between them. The program could also make better use of heap memory. 
 
+### PA 2 
+
+Multi-threaded TCP server capable of serving requests in parallel. 
+
+### PA 3 
+
+Multi-threaded, caching, TCP proxy server. 
+
+##### Notes
+
+Largely written on top of PA-2. The caching mechanism is a thread safe hash-table with linked list chaining. The head of each linked list contains a reader-writer semaphore that allows unlimited readers to simultainously access the list, but allows access to only one writer. 
+
+### PA 4
+
+Meant to be a distributed file system, but is not complete. Probably not much useful code here. 
